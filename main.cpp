@@ -1489,10 +1489,8 @@ void timerTurnLeft() {
   }
 
   if( isTimerRunning ) {
-    if( timerCurrentSetupInMillis == 0 ) {
-      if( cancelTimer() ) {
-        startShortBeep();
-      }
+    if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
+      cancelTimer();
     }
     return;
   }
