@@ -65,6 +65,7 @@ const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
 
 //time settings
 const uint16_t TIMEOUT_NTP_CLIENT_CONNECT = 2500;
+const uint16_t DELAY_NTP_UPDATED_CHECK = 10000;
 const uint16_t DELAY_NIGHT_MODE_CHECK = 60000;
 const uint32_t DELAY_NTP_TIME_SYNC = 3600000;
 const uint16_t DELAY_SEMICOLON_ANIMATION = 1000; //semicolon animation speed, in ms
@@ -141,6 +142,7 @@ bool isFirstLoopRun = true;
 unsigned long previousMillisDisplayAnimation = millis();
 unsigned long previousMillisSemicolonAnimation = millis();
 unsigned long previousMillisInternalLed = millis();
+unsigned long previousMillisNtpUpdatedCheck = millis();
 unsigned long previousMillisNightModeCheck = millis();
 unsigned long previousMillisWiFiStatusCheck = millis();
 unsigned long previousMillisTimeClientStatusCheck = millis();
@@ -154,6 +156,7 @@ void initVariables() {
   previousMillisDisplayAnimation = currentMillis;
   previousMillisSemicolonAnimation = currentMillis;
   previousMillisInternalLed = currentMillis;
+  previousMillisNtpUpdatedCheck = currentMillis;
   previousMillisNightModeCheck = currentMillis;
   previousMillisWiFiStatusCheck = currentMillis;
   previousMillisTimeClientStatusCheck = currentMillis;
@@ -924,21 +927,21 @@ String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.chi
   "</div>"
   "<div class=\"fx\">"
     "<h2>Timer Settings:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Setup Timeout (secs)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Last Timer Memory (mins)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button Press (mins)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button Turn (secs)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Blink Time (mins)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Beep Time (secs)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show Timer Progress Bar"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Setup timeout (secs)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Last timer memory (mins)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button press (mins)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button turn (secs)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Blink time (mins)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Beep time (secs)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show timer progress bar"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Display Settings:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Font"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Bold Font"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show Seconds"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Day Brightness"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Night Brightness"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Font typeface"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Bold font"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show seconds"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Day brightness"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Night brightness"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
   "</div>"
   "<div class=\"fx ft\">"
     "<div class=\"fi\"><button type=\"submit\">Apply</button></div>"
@@ -1387,7 +1390,7 @@ void enterTimerSetupMode() {
 boolean startTimer() {
   if( isTimerRunning ) return false;
   if( timerCurrentSetupInMillis == 0 ) {
-    if( isTimerOldFinished && timerOldSetupInMillis >= 1000 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) <= ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
+    if( isTimerOldFinished && timerOldSetupInMillis >= timerDeltaTurnSeconds * 1000 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) <= ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
       uint16_t wholeSecondRemainder = timerOldSetupInMillis % 1000;
       timerCurrentSetupInMillis = timerOldSetupInMillis - wholeSecondRemainder + ( wholeSecondRemainder < 500 ? 0 : 1000 );
     } else {
@@ -1607,16 +1610,17 @@ void loop() {
   }
 
   currentMillis = millis();
+  if( isFirstLoopRun || forceNtpUpdate || ( calculateDiffMillis( previousMillisNtpUpdatedCheck, millis() ) >= DELAY_NTP_UPDATED_CHECK ) ) {
+    if( updateTimeClient( false ) ) {
+      forceNtpUpdate = false;
+    }
+    previousMillisNtpUpdatedCheck = currentMillis;
+  }
   bool timeClientInitStatusChanged = timeClientTimeInitStatus != timeClient.isTimeSet();
-  if( isFirstLoopRun || forceNtpUpdate || forceNightModeUpdate || ( calculateDiffMillis( previousMillisNightModeCheck, currentMillis ) >= DELAY_NIGHT_MODE_CHECK ) || timeClientInitStatusChanged ) {
+  if( isFirstLoopRun || forceNightModeUpdate || ( calculateDiffMillis( previousMillisNightModeCheck, millis() ) >= DELAY_NIGHT_MODE_CHECK ) || timeClientInitStatusChanged ) {
     if( timeClientInitStatusChanged ) {
       forceDisplaySync();
-    }
-    timeClientTimeInitStatus = timeClient.isTimeSet();
-    if( forceNtpUpdate || !forceNightModeUpdate ) {
-      if( updateTimeClient( false ) ) {
-        forceNtpUpdate = false;
-      }
+      timeClientTimeInitStatus = timeClient.isTimeSet();
     }
     if( processTimeOfDay() ) {
       forceNightModeUpdate = false;
