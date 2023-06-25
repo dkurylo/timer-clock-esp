@@ -36,6 +36,8 @@
 #define ENCODER_TURN_RIGHT_PIN 5
 #define ENCODER_BUTTON_PIN 0
 
+#define BEEPER_PIN 16
+
 bool isNewBoard = false;
 const char* getFirmwareVersion() { const char* result = "1.00"; return result; }
 
@@ -50,7 +52,7 @@ const uint32_t TIMEOUT_AP = 180000;
 const uint8_t WIFI_SSID_MAX_LENGTH = 32;
 const uint8_t WIFI_PASSWORD_MAX_LENGTH = 32;
 const char* getWiFiHostName() { const char* result = "Timer-Clock"; return result; }
-const uint32_t TIMEOUT_CONNECT_WIFI = 90000;
+const uint32_t TIMEOUT_CONNECT_WIFI_SYNC = 90000;
 const uint32_t DELAY_WIFI_CONNECTION_CHECK = 60000;
 
 //internal on-board status led config
@@ -66,9 +68,8 @@ const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
 //time settings
 const uint16_t TIMEOUT_NTP_CLIENT_CONNECT = 2500;
 const uint16_t DELAY_NTP_UPDATED_CHECK = 10000;
-const uint16_t DELAY_NIGHT_MODE_CHECK = 60000;
 const uint32_t DELAY_NTP_TIME_SYNC = 3600000;
-const uint16_t DELAY_SEMICOLON_ANIMATION = 1000; //semicolon animation speed, in ms
+const bool SEMICOLON_ANIMATION_FAST = true; //semicolon period, true = 60 blinks per minute; false = 30 blinks per minute
 const uint16_t DELAY_DISPLAY_ANIMATION = 50; //led animation speed, in ms
 
 //timer settings
@@ -79,6 +80,7 @@ uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would
 uint8_t timerBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
 uint8_t timerLongBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
 uint8_t timerShortBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
+const bool IS_LOW_LEVEL_BUZZER = true;
 
 uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 10 * 1000;
 
@@ -118,8 +120,11 @@ uint8_t displayCurrentBrightness = 255;
 bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
 
-bool isNightMode = false;
-bool isUserAwake = true;
+//brightness settings
+const uint16_t DELAY_BRIGHTNESS_UPDATE_CHECK = 50;
+const uint16_t BRIGHTNESS_NIGHT_LEVEL = 20;
+const uint16_t BRIGHTNESS_DAY_LEVEL = 130;
+
 
 #ifdef ESP8266
 ESP8266WebServer wifiWebServer(80);
@@ -143,12 +148,11 @@ unsigned long previousMillisDisplayAnimation = millis();
 unsigned long previousMillisSemicolonAnimation = millis();
 unsigned long previousMillisInternalLed = millis();
 unsigned long previousMillisNtpUpdatedCheck = millis();
-unsigned long previousMillisNightModeCheck = millis();
 unsigned long previousMillisWiFiStatusCheck = millis();
 unsigned long previousMillisTimeClientStatusCheck = millis();
+unsigned long previousMillisBrightnessUpdatedCheck = millis();
 
 bool forceNtpUpdate = false;
-bool forceNightModeUpdate = false;
 
 void initVariables() {
   isFirstLoopRun = true;
@@ -157,9 +161,9 @@ void initVariables() {
   previousMillisSemicolonAnimation = currentMillis;
   previousMillisInternalLed = currentMillis;
   previousMillisNtpUpdatedCheck = currentMillis;
-  previousMillisNightModeCheck = currentMillis;
   previousMillisWiFiStatusCheck = currentMillis;
   previousMillisTimeClientStatusCheck = currentMillis;
+  previousMillisBrightnessUpdatedCheck = currentMillis;
 }
 
 
@@ -349,11 +353,7 @@ void setInternalLedStatus( uint8_t status ) {
   internalLedStatus = status;
 
   if( INTERNAL_LED_IS_USED ) {
-    if( isNightMode ) {
-      digitalWrite( LED_BUILTIN, INVERT_INTERNAL_LED ? HIGH : LOW );
-    } else {
-      digitalWrite( LED_BUILTIN, INVERT_INTERNAL_LED ? ( status == HIGH ? LOW : HIGH ) : status );
-    }
+    digitalWrite( LED_BUILTIN, INVERT_INTERNAL_LED ? ( status == HIGH ? LOW : HIGH ) : status );
   }
 }
 
@@ -402,33 +402,6 @@ bool updateTimeClient( bool canWait ) {
   return true;
 }
 
-time_t getTodayTimeAt( time_t dt, int hour, int minute ) {
-  struct tm* newTimeStruct = localtime(&dt);
-  newTimeStruct->tm_hour = hour;
-  newTimeStruct->tm_min = minute;
-  newTimeStruct->tm_sec = 0;
-  time_t newTime = mktime(newTimeStruct);
-  return newTime;
-}
-
-uint32_t getSecsFromStartOfDay( time_t dt ) {
-  time_t startDay = getTodayTimeAt( dt, 0, 0 );
-  uint32_t secsFromStartOfDay = (uint32_t)(difftime(dt, startDay));
-  return secsFromStartOfDay;
-}
-
-uint32_t getSecsFromStartOfYear( time_t dt ) {
-  struct tm* startOfYear = localtime(&dt);
-  startOfYear->tm_mon = 0;
-  startOfYear->tm_mday = 1;
-  startOfYear->tm_hour = 0;
-  startOfYear->tm_min = 0;
-  startOfYear->tm_sec = 0;
-  time_t startYear = mktime(startOfYear);
-  uint32_t secsFromStartYear = (uint32_t)(dt - startYear);
-  return secsFromStartYear;
-}
-
 bool isWithinDstBoundaries( time_t dt ) {
   struct tm *timeinfo = gmtime(&dt);
 
@@ -468,72 +441,46 @@ bool isWithinDstBoundaries( time_t dt ) {
   return dt > lastMarchSunday_t && dt < lastOctoberSunday_t;
 }
 
-std::pair<uint32_t, int8_t> getSunEvent( time_t dt, bool isSunrise ) { //true = sunrise event; false = sunset event
-  double secsInOneDay = 60.0 * 60.0 * 24.0;
-  double daysFromStartYear = (double)getSecsFromStartOfYear(dt) / secsInOneDay;
-
-  double latitude = 49.8397;
-  double longitude = 24.0297;
-  double zenith = 90.8333;
-
-  double longitudeHour = longitude / 360.0 * 24.0;
-
-  double timeOfEventApprox = daysFromStartYear + ( ( ( isSunrise ? 6.0 : 18.0 ) - longitudeHour ) / 24.0 );
-  double sunMeanAnomaly = ( 0.9856 * timeOfEventApprox ) - 3.289;
-  double sunLongitude = sunMeanAnomaly + ( 1.916 * sin( sunMeanAnomaly * M_PI / 180.0 ) ) + ( 0.020 * sin( 2 * sunMeanAnomaly * M_PI / 180.0 ) ) + 282.634;
-  double sunRightAscension = atan( 0.91764 * tan( sunLongitude * M_PI / 180.0 ) ) * 180.0 / M_PI;
-  double sunLongitudeQuadrant = floor( sunLongitude / 90.0 ) * 90.0;
-  double sunRightAscensionQuadrant = floor( sunRightAscension / 90.0 ) * 90.0;
-  sunRightAscension = sunRightAscension + ( sunLongitudeQuadrant - sunRightAscensionQuadrant );
-  double sunRightAscensionHour = sunRightAscension / 360.0 * 24.0;
-  double sunDeclinationSin = 0.39782 * sin( sunLongitude * M_PI / 180.0 );
-  double sunDeclinationCos = cos( asin( sunDeclinationSin ) );
-  double sunLocalAngleCos = ( cos( zenith * M_PI / 180.0 ) - ( sunDeclinationSin * sin( latitude * M_PI / 180.0 ) ) ) / ( sunDeclinationCos * cos( latitude * M_PI / 180.0 ) );
-  if( sunLocalAngleCos > 1 ) return std::make_pair(0, -1); //never rises
-  if( sunLocalAngleCos < - 1 ) return std::make_pair(0, 1); //never sets
-  double sunLocalAngle = isSunrise ? ( 360.0 - acos( sunLocalAngleCos ) * 180.0 / M_PI ) : ( acos( sunLocalAngleCos ) * 180.0 / M_PI );
-  double sunLocalHour = sunLocalAngle / 360.0 * 24.0;
-  double sunEventLocalTime = sunLocalHour + sunRightAscensionHour - ( 0.06571 * timeOfEventApprox ) - 6.622;
-  double sunEventTime = sunEventLocalTime - longitudeHour;
-  if( sunEventTime < 0 ) sunEventTime += 24;
-  if( sunEventTime >= 24 ) sunEventTime -= 24;
-  uint32_t sunEventSecsFromStartOfDay = (uint32_t)(sunEventTime * 60 * 60);
-  return std::make_pair(sunEventSecsFromStartOfDay, 0);
-}
-
-void calculateTimeOfDay( time_t dt ) {
-  uint32_t secsFromStartOfDay = getSecsFromStartOfDay(dt);
-  std::pair<uint32_t, int8_t> secsFromStartOfDaytoSunrise = getSunEvent(dt, true);
-  if( secsFromStartOfDaytoSunrise.second == -1 ) { //never rises
-    isNightMode = true;
-  } else if( secsFromStartOfDaytoSunrise.second == 1 ) { //never sets
-    isNightMode = false;
-  } else if( secsFromStartOfDay < secsFromStartOfDaytoSunrise.first ) { //night before sunrise
-    isNightMode = true;
-  } else { //day or night after sunset
-    std::pair<uint32_t, int8_t> secsFromStartOfDaytoSunset = getSunEvent(dt, false);
-    if( secsFromStartOfDaytoSunset.second == -1 ) { //never rises
-      isNightMode = true;
-    } else if( secsFromStartOfDaytoSunset.second == 1 ) { //never sets
-      isNightMode = false;
-    } else if( secsFromStartOfDay > secsFromStartOfDaytoSunset.first ) { //night after sunset
-      isNightMode = true;
-    } else { //day
-      isNightMode = false;
-    }
-  }
-  int8_t dstBoundariesCorrection = isWithinDstBoundaries( dt ) ? -1 : 0;
-  isUserAwake = difftime(dt, getTodayTimeAt(dt, 6 + dstBoundariesCorrection, 0)) > 0 && difftime(dt, getTodayTimeAt(dt, 19 + dstBoundariesCorrection, 30)) < 0;
-}
-
-bool processTimeOfDay() {
-  if( !timeClient.isTimeSet() ) return false;
-  calculateTimeOfDay( timeClient.getEpochTime() );
-  return true;
-}
-
 
 //display functionality
+double displayBrightnessCurrent = 0.0;
+int16_t brightnessSamples[50] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+
+void calculateDisplayBrightness() {
+  double brightnessAverage = 0;
+  int16_t brightnessSamplesLength = sizeof(brightnessSamples) / sizeof(brightnessSamples[0]);
+  uint8_t brightnessSamplesPopulated = 0;
+  for( int8_t i = brightnessSamplesLength - 1 - 1; i >= 0; i-- ) {
+    int16_t brightnessSample = brightnessSamples[i];
+    brightnessSamples[i+1] = brightnessSample;
+    if( brightnessSample != -1 ) {
+      brightnessAverage += brightnessSample;
+      brightnessSamplesPopulated++;
+    }
+  }
+
+  int16_t currentBrightness = analogRead(A0);
+  brightnessSamples[0] = currentBrightness;
+  brightnessAverage += currentBrightness;
+  brightnessSamplesPopulated++;
+
+  brightnessAverage = brightnessAverage / brightnessSamplesPopulated;
+  //Serial.print( brightnessAverage ); //xxx
+  //Serial.print( " - " ); //xxx
+
+  if( brightnessAverage >= BRIGHTNESS_DAY_LEVEL ) {
+    displayBrightnessCurrent = static_cast<double>(displayDayModeBrightness);
+    //Serial.print( "D " ); Serial.println( displayBrightnessCurrent ); //xxx
+  } else if( brightnessAverage < BRIGHTNESS_NIGHT_LEVEL ) {
+    displayBrightnessCurrent = static_cast<double>(displayNightModeBrightness);
+    //Serial.print( "N " ); Serial.println( displayBrightnessCurrent ); //xxx
+  } else {
+    double nightBrightness = static_cast<double>(displayNightModeBrightness);
+    displayBrightnessCurrent = nightBrightness + static_cast<double>( displayDayModeBrightness - nightBrightness ) * ( brightnessAverage - BRIGHTNESS_NIGHT_LEVEL ) / ( BRIGHTNESS_DAY_LEVEL - BRIGHTNESS_NIGHT_LEVEL );
+    //Serial.print( "M " ); Serial.println( displayBrightnessCurrent ); //xxx
+  }
+}
+
 void setDisplayBrightness( uint8_t displayNewBrightness ) {
   displayCurrentBrightness = displayNewBrightness;
   display.control( MD_MAX72XX::INTENSITY, displayNewBrightness );
@@ -541,17 +488,27 @@ void setDisplayBrightness( uint8_t displayNewBrightness ) {
 }
 
 void setDisplayBrightness() {
-  uint8_t displayNewBrightness = ( isNightMode || !isUserAwake ) ? displayNightModeBrightness : displayDayModeBrightness;
+  uint8_t displayNewBrightness = round( displayBrightnessCurrent );
   if( displayCurrentBrightness != displayNewBrightness ) {
     setDisplayBrightness( displayNewBrightness );
   }
 }
 
 void initDisplay() {
+  calculateDisplayBrightness();
   display.begin();
   setDisplayBrightness();
   display.clear();
 }
+
+void brightnessProcessLoopTick() {
+  if( calculateDiffMillis( previousMillisBrightnessUpdatedCheck, millis() ) >= DELAY_BRIGHTNESS_UPDATE_CHECK ) {
+    calculateDisplayBrightness();
+    setDisplayBrightness();
+    previousMillisBrightnessUpdatedCheck = millis();
+  }
+}
+
 
 bool isSemicolonShown = true;
 void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
@@ -646,7 +603,8 @@ void renderDisplay() {
       timerBlinkingLastUpdateMillis += TIMER_BLINKING_DELAY;
     }
 
-    String textToDisplayLarge = isTimerBlinkingShown ? ( String( "00" ) + ( isSemicolonShown ? ":" : "\t" ) + String( "00" ) ) : ( String( "  " ) + ( isSemicolonShown ? ":" : "\t" ) + String( "  " ) );
+    //String textToDisplayLarge = isTimerBlinkingShown ? ( String( "00" ) + ( isSemicolonShown ? ":" : "\t" ) + String( "00" ) ) : ( String( "  " ) + ( isSemicolonShown ? ":" : "\t" ) + String( "  " ) );
+    String textToDisplayLarge = isTimerBlinkingShown ? String( "00:00" ) : String( "  \t  " );
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
     renderDisplayText( textToDisplayLarge, textToDisplaySmall );
 
@@ -680,8 +638,6 @@ void renderDisplay() {
 void forceRefreshData() {
   initVariables();
   initTimeClient();
-  //forceNtpUpdate = true;
-  forceNightModeUpdate = true;
 }
 
 
@@ -700,6 +656,8 @@ const String getWiFiStatusText( wl_status_t status ) {
       return F("CONNECT_FAILED");
     case WL_CONNECTION_LOST:
       return F("CONNECTION_LOST");
+    case WL_WRONG_PASSWORD:
+      return F("WRONG_PASSWORD");
     case WL_DISCONNECTED:
       return F("DISCONNECTED");
     default:
@@ -707,10 +665,9 @@ const String getWiFiStatusText( wl_status_t status ) {
   }
 }
 
-
 void disconnectFromWiFi( bool erasePreviousCredentials ) {
   wl_status_t wifiStatus = WiFi.status();
-  if( wifiStatus != WL_DISCONNECTED && wifiStatus != WL_IDLE_STATUS ) {
+  if( wifiStatus != WL_IDLE_STATUS ) {
     Serial.print( String( F("Disconnecting from WiFi '") ) + WiFi.SSID() + String( F("'...") ) );
     uint8_t previousInternalLedStatus = getInternalLedStatus();
     setInternalLedStatus( HIGH );
@@ -727,24 +684,56 @@ void disconnectFromWiFi( bool erasePreviousCredentials ) {
   }
 }
 
-void processWiFiConnection() {
+void connectToWiFiAsync( bool isInit ) {
+  if( strlen(wiFiClientSsid) == 0 ) {
+    createAccessPoint();
+    return;
+  }
+
+  Serial.print( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
+  WiFi.hostname( ( String( getWiFiHostName() ) + "-" + String( ESP.getChipId() ) ).c_str() );
+  WiFi.begin( wiFiClientSsid, wiFiClientPassword );
+
+  if( WiFi.isConnected() ) {
+    shutdownAccessPoint();
+    return;
+  } else {
+    Serial.println();
+  }
+
   wl_status_t wifiStatus = WiFi.status();
   if( WiFi.isConnected() ) {
-    Serial.println( String( F(" WiFi status: ") ) + getWiFiStatusText( wifiStatus ) );
+    Serial.println( String( F(" done. WiFi status: ") ) + getWiFiStatusText( wifiStatus ) );
     shutdownAccessPoint();
     forceRefreshData();
-  } else if( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS ) {
-    Serial.println( String( F(" WiFi status: ") ) + getWiFiStatusText( wifiStatus ) );
+  } else if( !isInit && ( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS || wifiStatus == WL_DISCONNECTED ) ) {
+    Serial.println( String( F("ERROR. WiFi status: ") ) + getWiFiStatusText( wifiStatus ) );
+    disconnectFromWiFi( false );
+    createAccessPoint();
   }
 }
 
-void processWiFiConnectionWithWait() {
+
+void connectToWiFiSync() {
+  if( strlen(wiFiClientSsid) == 0 ) {
+    createAccessPoint();
+    return;
+  }
+
+  Serial.println( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
+  WiFi.hostname( ( String( getWiFiHostName() ) + "-" + String( ESP.getChipId() ) ).c_str() );
+  WiFi.begin( wiFiClientSsid, wiFiClientPassword );
+
+  if( WiFi.isConnected() ) {
+    shutdownAccessPoint();
+    return;
+  }
+
   unsigned long wiFiConnectStartedMillis = millis();
   uint8_t previousInternalLedStatus = getInternalLedStatus();
   while( true ) {
     setInternalLedStatus( HIGH );
     delay( 1000 );
-    Serial.print( "." );
     wl_status_t wifiStatus = WiFi.status();
     if( WiFi.isConnected() ) {
       Serial.println( F(" done") );
@@ -752,44 +741,13 @@ void processWiFiConnectionWithWait() {
       shutdownAccessPoint();
       forceRefreshData();
       break;
-    } else if( ( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS ) && ( calculateDiffMillis( wiFiConnectStartedMillis, millis() ) >= TIMEOUT_CONNECT_WIFI ) ) {
+    } else if( ( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS ) && ( calculateDiffMillis( wiFiConnectStartedMillis, millis() ) >= TIMEOUT_CONNECT_WIFI_SYNC ) ) {
       Serial.println( String( F(" ERROR: ") ) + getWiFiStatusText( wifiStatus ) );
       setInternalLedStatus( previousInternalLedStatus );
       disconnectFromWiFi( false );
       createAccessPoint();
       break;
     }
-  }
-}
-
-void connectToWiFi( bool forceConnect, bool tryNewCredentials ) { //wifi creds are automatically stored in NVM when WiFi.begin( ssid, pwd ) is used, and automatically read from NVM if WiFi.begin() is used
-  if( strlen(wiFiClientSsid) == 0 ) {
-    createAccessPoint();
-    return;
-  }
-
-  if( forceConnect || tryNewCredentials || ( !isApInitialized && !WiFi.isConnected() ) ) {
-    Serial.print( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
-    WiFi.hostname( ( String( getWiFiHostName() ) + "-" + String( ESP.getChipId() ) ).c_str() );
-    if( tryNewCredentials || ( !isApInitialized && !WiFi.isConnected() ) ) {
-      WiFi.begin( wiFiClientSsid, wiFiClientPassword ); //when calling WiFi.begin( ssid, pwd ), credentials are stored in NVM, no matter if they are the same or differ
-    } else {
-      WiFi.begin(); //when you don't expect credentials to be changed, you need to connect using WiFi.begin() which will load already stored creds from NVM in order to save NVM duty cycles
-    }
-  }
-
-  if( WiFi.isConnected() ) {
-    if( forceConnect || tryNewCredentials ) {
-      Serial.println( F(" done") );
-    }
-    shutdownAccessPoint();
-    return;
-  }
-
-  if( forceConnect || tryNewCredentials ) {
-    processWiFiConnectionWithWait();
-  } else {
-    processWiFiConnection();
   }
 }
 
@@ -950,7 +908,7 @@ String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.chi
 "<div class=\"fx ft\">"
   "<span>"
     "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TEST_NIGHT_ENDPOINT, F("Test Dimming") ) + String( F("<span class=\"i\" title=\"Apply your settings before testing!\"></span></span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Test LEDs") ) + String( F("</span>"
+    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Test Display") ) + String( F("</span>"
   "</span>"
   "<span class=\"lnk\"></span>"
   "<span>"
@@ -1121,7 +1079,7 @@ void handleWebServerPost() {
 
   bool isWiFiChanged = strcmp( wiFiClientSsid, htmlPageSsidNameReceived.c_str() ) != 0 || strcmp( wiFiClientPassword, htmlPageSsidPasswordReceived.c_str() ) != 0;
 
-  String waitTime = isWiFiChanged ? String(TIMEOUT_CONNECT_WIFI/1000 + 6) : "2";
+  String waitTime = isWiFiChanged ? String(TIMEOUT_CONNECT_WIFI_SYNC/1000 + 6) : "2";
   String content = getHtmlPage( getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Save successful</h2>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
@@ -1224,7 +1182,7 @@ void handleWebServerPost() {
     writeEepromCharArray( eepromWiFiSsidIndex, wiFiClientSsid, WIFI_SSID_MAX_LENGTH );
     writeEepromCharArray( eepromWiFiPasswordIndex, wiFiClientPassword, WIFI_PASSWORD_MAX_LENGTH );
     shutdownAccessPoint();
-    connectToWiFi( true, true );
+    connectToWiFiSync();
   }
 }
 
@@ -1249,6 +1207,7 @@ void handleWebServerGetTestLeds() {
         display.setPoint( y, 32 - 1 - x, row == y );
       }
     }
+    display.update();
     delay( 400 );
   }
   for( uint8_t column = 0; column < 31; ++column ) {
@@ -1257,6 +1216,7 @@ void handleWebServerGetTestLeds() {
         display.setPoint( y, 32 - 1 - x, column == x );
       }
     }
+    display.update();
     delay( 200 );
   }
   for( uint8_t y = 0; y < 8; ++y ) {
@@ -1264,7 +1224,8 @@ void handleWebServerGetTestLeds() {
       display.setPoint( y, 32 - 1 - x, true );
     }
   }
-  delay( 1500 );
+  display.update();
+  delay( 2000 );
 }
 
 void handleWebServerGetReboot() {
@@ -1289,7 +1250,7 @@ void stopWebServer() {
 }
 
 void startWebServer() {
-  if( /*!isApInitialized || !wiFiClient.connected() || */isWebServerInitialized ) return;
+  if( isWebServerInitialized ) return;
   Serial.print( F("Starting web server...") );
   wifiWebServer.begin();
   isWebServerInitialized = true;
@@ -1310,32 +1271,54 @@ void configureWebServer() {
 
 
 //beeper functions
+bool beeperPinStatus = false;
+void startBeeping() {
+  if( beeperPinStatus ) return;
+  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 0 : 1 );
+  beeperPinStatus = true;
+}
+
+void stopBeeping( bool isInit ) {
+  if( !isInit && !beeperPinStatus ) return;
+  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 1 : 0 );
+  beeperPinStatus = false;
+}
+
+void stopBeeping() {
+  stopBeeping( false );
+}
+
+void initBeeper() {
+  pinMode( BEEPER_PIN, OUTPUT );
+  stopBeeping( true );
+}
+
 void startLongBeep() {
   if( timerLongBeepingTimeSeconds == 0 ) return;
   isTimerLongBeeping = true;
   timerLongBeepingStartTimeMillis = millis();
-  //TODO start actual beep
+  startBeeping();
 }
 
 void stopLongBeep() {
   isTimerLongBeeping = false;
   timerLongBeepingStartTimeMillis = 0;
   if( !isTimerLongBeeping && !isTimerShortBeeping ) {
-    //TODO stop actual beep
+    stopBeeping();
   }
 }
 
 void startShortBeep() {
   isTimerShortBeeping = true;
   timerShortBeepingStartTimeMillis = millis();
-  //TODO start actual beep
+  startBeeping();
 }
 
 void stopShortBeep() {
   isTimerShortBeeping = false;
   timerShortBeepingStartTimeMillis = 0;
   if( !isTimerLongBeeping && !isTimerShortBeeping ) {
-    //TODO stop actual beep
+    stopBeeping();
   }
 }
 
@@ -1343,8 +1326,40 @@ void beeperProcessLoopTick() {
   if( isTimerShortBeeping && ( timerShortBeepingTimeMillis == 0 || calculateDiffMillis( timerShortBeepingStartTimeMillis, millis() ) >= ( timerShortBeepingTimeMillis ) ) ) {
     stopShortBeep();
   }
-  if( isTimerLongBeeping && ( timerLongBeepingTimeSeconds == 0 || calculateDiffMillis( timerLongBeepingStartTimeMillis, millis() ) >= ( timerLongBeepingTimeSeconds * 1000 ) ) ) {
-    stopLongBeep();
+  if( isTimerLongBeeping ) {
+    unsigned long timerIsBeepingForTime = calculateDiffMillis( timerLongBeepingStartTimeMillis, millis() );
+    if( timerLongBeepingTimeSeconds == 0 || timerIsBeepingForTime >= ( timerLongBeepingTimeSeconds * 1000 ) ) {
+      stopLongBeep();
+    } else {
+      uint8_t timerFirstStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 8;
+      uint8_t timerSecondStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 4;
+      uint8_t timerThirdStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 2;
+      if( timerIsBeepingForTime < timerFirstStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 1000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else if( timerIsBeepingForTime < timerSecondStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 2000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else if( timerIsBeepingForTime < timerThirdStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 4000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else {
+        if( timerIsBeepingForTime % 8000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      }
+    }
   }
 }
 
@@ -1434,6 +1449,7 @@ bool stopBeepingOrBlinking() {
     }
     if( isTimerBlinking ) {
       stopBlinking();
+      startShortBeep();
       wasTimerLongBeepingOrBlinking = true;
     }
     if( wasTimerLongBeepingOrBlinking ) {
@@ -1493,7 +1509,9 @@ void timerTurnLeft() {
 
   if( isTimerRunning ) {
     if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
-      cancelTimer();
+      if( cancelTimer() ) {
+        startShortBeep();
+      }
     }
     return;
   }
@@ -1558,23 +1576,23 @@ void onWiFiConnected( const WiFiEventStationModeConnected&event ) {
 }
 
 void setup() {
+  initBeeper();
+  initInternalLed();
+
   Serial.begin( 115200 );
   Serial.println();
   Serial.println( String( F("Timer Clock by Dmytro Kurylo. V@") ) + getFirmwareVersion() + String( F(" CPU@") ) + String( ESP.getCpuFreqMHz() ) );
 
-  initInternalLed();
   initEeprom();
   loadEepromData();
   initVariables();
+  initDisplay();
+
   configureWebServer();
   wiFiEventHandler = WiFi.onStationModeConnected( &onWiFiConnected );
-  connectToWiFi( false, false );
-  Serial.println();
+  connectToWiFiAsync( true );
   startWebServer();
   initTimeClient();
-  //updateTimeClient( false );
-  //processTimeOfDay();
-  initDisplay();
 }
 
 void loop() {
@@ -1594,16 +1612,18 @@ void loop() {
   }
   wifiWebServer.handleClient();
 
+  brightnessProcessLoopTick();
+
   currentMillis = millis();
   if( isApInitialized && ( calculateDiffMillis( apStartedMillis, currentMillis ) >= TIMEOUT_AP ) ) {
     shutdownAccessPoint();
-    connectToWiFi( false, false );
+    connectToWiFiSync();
   }
 
   if( /*isFirstLoopRun || */( calculateDiffMillis( previousMillisWiFiStatusCheck, currentMillis ) >= DELAY_WIFI_CONNECTION_CHECK ) ) {
     if( !WiFi.isConnected() ) {
       if( !isApInitialized ) {
-        connectToWiFi( false, false );
+        connectToWiFiAsync( false );
       }
     }
     previousMillisWiFiStatusCheck = currentMillis;
@@ -1617,16 +1637,9 @@ void loop() {
     previousMillisNtpUpdatedCheck = currentMillis;
   }
   bool timeClientInitStatusChanged = timeClientTimeInitStatus != timeClient.isTimeSet();
-  if( isFirstLoopRun || forceNightModeUpdate || ( calculateDiffMillis( previousMillisNightModeCheck, millis() ) >= DELAY_NIGHT_MODE_CHECK ) || timeClientInitStatusChanged ) {
-    if( timeClientInitStatusChanged ) {
-      forceDisplaySync();
-      timeClientTimeInitStatus = timeClient.isTimeSet();
-    }
-    if( processTimeOfDay() ) {
-      forceNightModeUpdate = false;
-    }
-    setDisplayBrightness();
-    previousMillisNightModeCheck = currentMillis;
+  if( timeClientInitStatusChanged ) {
+    forceDisplaySync();
+    timeClientTimeInitStatus = timeClient.isTimeSet();
   }
 
   currentMillis = millis();
@@ -1644,8 +1657,15 @@ void loop() {
         isForceDisplaySync = false;
       } else if( timeClient.isTimeSet() ) {
         unsigned long timeClientSecondsCurrent = timeClient.getEpochTime();
-        isSemicolonShown = timeClientSecondsCurrent % 2 == 0;
+        if( !SEMICOLON_ANIMATION_FAST ) {
+          isSemicolonShown = timeClientSecondsCurrent % 2 == 0;
+        } else { //else if 500 let it remain blank until the next second comes
+          isSemicolonShown = false;
+        }
         if( timeClientInitStatusChanged || timeClientSecondsAtDisplaySyncStart != timeClientSecondsCurrent ) {
+          if( SEMICOLON_ANIMATION_FAST ) {
+            isSemicolonShown = true;
+          }
           previousMillisSemicolonAnimation = currentMillis;
           previousMillisDisplayAnimation = currentMillis;
           isForceDisplaySync = false;
@@ -1660,9 +1680,9 @@ void loop() {
       }
     } else {
       previousMillisDisplayAnimation += DELAY_DISPLAY_ANIMATION;
-      if( calculateDiffMillis( previousMillisSemicolonAnimation, currentMillis ) >= DELAY_SEMICOLON_ANIMATION ) {
+      if( calculateDiffMillis( previousMillisSemicolonAnimation, currentMillis ) >= ( SEMICOLON_ANIMATION_FAST ? 500 : 1000 ) ) {
         isSemicolonShown = !isSemicolonShown;
-        previousMillisSemicolonAnimation += DELAY_SEMICOLON_ANIMATION;
+        previousMillisSemicolonAnimation += ( SEMICOLON_ANIMATION_FAST ? 500 : 1000 );
       }
     }
 
