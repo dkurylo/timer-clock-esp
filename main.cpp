@@ -17,8 +17,6 @@
 
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <time.h>
-#include <math.h>
 #include <EEPROM.h>
 
 #include <MD_MAX72xx.h>
