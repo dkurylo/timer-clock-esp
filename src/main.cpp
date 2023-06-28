@@ -119,9 +119,9 @@ bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
 
 //brightness settings
-const uint16_t DELAY_BRIGHTNESS_UPDATE_CHECK = 50;
-const uint16_t BRIGHTNESS_NIGHT_LEVEL = 20;
-const uint16_t BRIGHTNESS_DAY_LEVEL = 130;
+const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 110;
 
 
 #ifdef ESP8266
@@ -148,7 +148,7 @@ unsigned long previousMillisInternalLed = millis();
 unsigned long previousMillisNtpUpdatedCheck = millis();
 unsigned long previousMillisWiFiStatusCheck = millis();
 unsigned long previousMillisTimeClientStatusCheck = millis();
-unsigned long previousMillisBrightnessUpdatedCheck = millis();
+unsigned long previousMillisSensorBrightnessCheck = millis();
 
 bool forceNtpUpdate = false;
 
@@ -161,7 +161,7 @@ void initVariables() {
   previousMillisNtpUpdatedCheck = currentMillis;
   previousMillisWiFiStatusCheck = currentMillis;
   previousMillisTimeClientStatusCheck = currentMillis;
-  previousMillisBrightnessUpdatedCheck = currentMillis;
+  previousMillisSensorBrightnessCheck = currentMillis;
 }
 
 
@@ -441,69 +441,72 @@ bool isWithinDstBoundaries( time_t dt ) {
 
 
 //display functionality
-double displayBrightnessCurrent = 0.0;
-int16_t brightnessSamples[50] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+uint8_t displayCurrentBrightness = 0;
+uint8_t displayPreviousBrightness = 0;
+double sensorBrightnessAverage = 0.0;
+uint8_t sensorBrightnessSamplesTaken = 0;
+uint16_t DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS = 5000;
+unsigned long previousDisplayBrightnessToleranceUpdatedMillis = millis();
 
 void calculateDisplayBrightness() {
-  double brightnessAverage = 0;
-  int16_t brightnessSamplesLength = sizeof(brightnessSamples) / sizeof(brightnessSamples[0]);
-  uint8_t brightnessSamplesPopulated = 0;
-  for( int8_t i = brightnessSamplesLength - 1 - 1; i >= 0; i-- ) {
-    int16_t brightnessSample = brightnessSamples[i];
-    brightnessSamples[i+1] = brightnessSample;
-    if( brightnessSample != -1 ) {
-      brightnessAverage += brightnessSample;
-      brightnessSamplesPopulated++;
-    }
+  uint8_t sensorBrightnessSamplesToTake = 50;
+  uint16_t currentBrightness = analogRead(A0);
+  if( sensorBrightnessSamplesTaken < sensorBrightnessSamplesToTake ) {
+    sensorBrightnessSamplesTaken++;
   }
+  sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamplesTaken - 1 ) + currentBrightness ) / sensorBrightnessSamplesTaken;
 
-  int16_t currentBrightness = analogRead(A0);
-  brightnessSamples[0] = currentBrightness;
-  brightnessAverage += currentBrightness;
-  brightnessSamplesPopulated++;
-
-  brightnessAverage = brightnessAverage / brightnessSamplesPopulated;
-  //Serial.print( brightnessAverage ); //xxx
-  //Serial.print( " - " ); //xxx
-
-  if( brightnessAverage >= BRIGHTNESS_DAY_LEVEL ) {
-    displayBrightnessCurrent = static_cast<double>(displayDayModeBrightness);
-    //Serial.print( "D " ); Serial.println( displayBrightnessCurrent ); //xxx
-  } else if( brightnessAverage < BRIGHTNESS_NIGHT_LEVEL ) {
-    displayBrightnessCurrent = static_cast<double>(displayNightModeBrightness);
-    //Serial.print( "N " ); Serial.println( displayBrightnessCurrent ); //xxx
+  if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
+    displayCurrentBrightness = static_cast<double>(displayDayModeBrightness);
+  } else if( sensorBrightnessAverage <= SENSOR_BRIGHTNESS_NIGHT_LEVEL ) {
+    displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
   } else {
-    double nightBrightness = static_cast<double>(displayNightModeBrightness);
-    displayBrightnessCurrent = nightBrightness + static_cast<double>( displayDayModeBrightness - nightBrightness ) * ( brightnessAverage - BRIGHTNESS_NIGHT_LEVEL ) / ( BRIGHTNESS_DAY_LEVEL - BRIGHTNESS_NIGHT_LEVEL );
-    //Serial.print( "M " ); Serial.println( displayBrightnessCurrent ); //xxx
+    displayCurrentBrightness = round( static_cast<double>( displayDayModeBrightness - displayNightModeBrightness ) * ( sensorBrightnessAverage - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) / ( SENSOR_BRIGHTNESS_DAY_LEVEL - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) );
   }
 }
 
 void setDisplayBrightness( uint8_t displayNewBrightness ) {
-  displayCurrentBrightness = displayNewBrightness;
   display.control( MD_MAX72XX::INTENSITY, displayNewBrightness );
   display.control( MD_MAX72XX::UPDATE, MD_MAX72XX::OFF );
 }
 
-void setDisplayBrightness() {
-  uint8_t displayNewBrightness = round( displayBrightnessCurrent );
-  if( displayCurrentBrightness != displayNewBrightness ) {
-    setDisplayBrightness( displayNewBrightness );
+void setDisplayBrightness( bool isInit ) {
+  unsigned long currentMillis = millis();
+  bool updateDisplayBrightness = false;
+
+  if( isInit ) {
+    updateDisplayBrightness = true;
+  } else if( displayCurrentBrightness != displayPreviousBrightness ) {
+    if( calculateDiffMillis( previousDisplayBrightnessToleranceUpdatedMillis, currentMillis ) < DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS ) {
+      uint8_t diffTolerance = 1;
+      uint8_t brightnessDiff = displayCurrentBrightness > displayPreviousBrightness ? displayCurrentBrightness - displayPreviousBrightness : displayPreviousBrightness - displayCurrentBrightness;
+      if( brightnessDiff > diffTolerance ) {
+        updateDisplayBrightness = true;
+      }
+    } else {
+      updateDisplayBrightness = true;
+    }
+  }
+
+  if( updateDisplayBrightness ) {
+    setDisplayBrightness( displayCurrentBrightness );
+    displayPreviousBrightness = displayCurrentBrightness;
+    previousDisplayBrightnessToleranceUpdatedMillis = currentMillis;
   }
 }
 
 void initDisplay() {
   calculateDisplayBrightness();
   display.begin();
-  setDisplayBrightness();
+  setDisplayBrightness( true );
   display.clear();
 }
 
 void brightnessProcessLoopTick() {
-  if( calculateDiffMillis( previousMillisBrightnessUpdatedCheck, millis() ) >= DELAY_BRIGHTNESS_UPDATE_CHECK ) {
+  if( calculateDiffMillis( previousMillisSensorBrightnessCheck, millis() ) >= DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK ) {
     calculateDisplayBrightness();
-    setDisplayBrightness();
-    previousMillisBrightnessUpdatedCheck = millis();
+    setDisplayBrightness( false );
+    previousMillisSensorBrightnessCheck = millis();
   }
 }
 
@@ -1167,7 +1170,7 @@ void handleWebServerPost() {
   }
 
   if( isDisplayIntensityUpdateRequired ) {
-    setDisplayBrightness();
+    setDisplayBrightness( true );
   }
   if( isDisplayRerenderRequired ) {
     renderDisplay();
@@ -1191,7 +1194,7 @@ void handleWebServerGetTestNight() {
     setDisplayBrightness( displayNightModeBrightness );
     renderDisplay();
     delay( 6000 );
-    setDisplayBrightness();
+    setDisplayBrightness( true );
     renderDisplay();
 }
 
