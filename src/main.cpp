@@ -112,9 +112,8 @@ uint8_t displayFontTypeNumber = 0;
 bool isDisplayBoldFontUsed = true;
 bool isDisplaySecondsShown = false;
 bool isProgressIndicatorShown = false;
-uint8_t displayDayModeBrightness = 3;
-uint8_t displayNightModeBrightness = 0;
-uint8_t displayCurrentBrightness = 255;
+uint8_t displayDayModeBrightness = 7;
+uint8_t displayNightModeBrightness = 1;
 bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
 
