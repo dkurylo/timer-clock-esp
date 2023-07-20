@@ -112,15 +112,17 @@ uint8_t displayFontTypeNumber = 0;
 bool isDisplayBoldFontUsed = true;
 bool isDisplaySecondsShown = false;
 bool isProgressIndicatorShown = false;
-uint8_t displayDayModeBrightness = 7;
+uint8_t displayDayModeBrightness = 9;
 uint8_t displayNightModeBrightness = 1;
 bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
+bool isSingleDigitHourShown = false;
+bool isRotateDisplay = false;
 
 //brightness settings
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 110;
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 30;
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 130;
 
 
 #ifdef ESP8266
@@ -192,7 +194,9 @@ const uint16_t eepromTimerDeltaTurnIndex = eepromTimerDeltaPressIndex + 1;
 const uint16_t eepromTimerBlinkingTimeIndex = eepromTimerDeltaTurnIndex + 1;
 const uint16_t eepromTimerBeepingTimeIndex = eepromTimerBlinkingTimeIndex + 1;
 const uint16_t eepromTimerIsProgressIndicatorShownIndex = eepromTimerBeepingTimeIndex + 1;
-const uint16_t eepromLastByteIndex = eepromTimerIsProgressIndicatorShownIndex + 1;
+const uint16_t eepromIsSingleDigitHourShownIndex = eepromTimerIsProgressIndicatorShownIndex + 1;
+const uint16_t eepromIsRotateDisplayIndex = eepromIsSingleDigitHourShownIndex + 1;
+const uint16_t eepromLastByteIndex = eepromIsRotateDisplayIndex + 1;
 
 const uint16_t EEPROM_ALLOCATED_SIZE = eepromLastByteIndex;
 void initEeprom() {
@@ -287,6 +291,8 @@ void loadEepromData() {
     readEepromIntValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeMinutes, true );
     readEepromIntValue( eepromTimerBeepingTimeIndex, timerLongBeepingTimeSeconds, true );
     readEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown, true );
+    readEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown, true );
+    readEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay, true );
 
   } else { //fill EEPROM with default values when starting the new board
     writeEepromBoolValue( eepromIsNewBoardIndex, false );
@@ -307,6 +313,8 @@ void loadEepromData() {
     writeEepromIntValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeMinutes );
     writeEepromIntValue( eepromTimerBeepingTimeIndex, timerLongBeepingTimeSeconds );
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown );
+    writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown );
+    writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay );
 
     isNewBoard = false;
   }
@@ -440,27 +448,27 @@ bool isWithinDstBoundaries( time_t dt ) {
 
 
 //display functionality
-uint8_t displayCurrentBrightness = 0;
-uint8_t displayPreviousBrightness = 0;
-double sensorBrightnessAverage = 0.0;
-uint8_t sensorBrightnessSamplesTaken = 0;
-uint16_t DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS = 5000;
-unsigned long previousDisplayBrightnessToleranceUpdatedMillis = millis();
+double displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
+double displayPreviousBrightness = -1.0;
+double sensorBrightnessAverage = -1.0;
+//uint16_t DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS = 5000;
+//unsigned long previousDisplayBrightnessToleranceUpdatedMillis = millis();
 
 void calculateDisplayBrightness() {
-  uint8_t sensorBrightnessSamplesToTake = 50;
   uint16_t currentBrightness = analogRead(A0);
-  if( sensorBrightnessSamplesTaken < sensorBrightnessSamplesToTake ) {
-    sensorBrightnessSamplesTaken++;
+  if( sensorBrightnessAverage < 0 ) {
+    sensorBrightnessAverage = currentBrightness;
+  } else {
+    uint8_t sensorBrightnessSamples = 50;
+    sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
   }
-  sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamplesTaken - 1 ) + currentBrightness ) / sensorBrightnessSamplesTaken;
 
   if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
     displayCurrentBrightness = static_cast<double>(displayDayModeBrightness);
   } else if( sensorBrightnessAverage <= SENSOR_BRIGHTNESS_NIGHT_LEVEL ) {
     displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
   } else {
-    displayCurrentBrightness = round( static_cast<double>( displayDayModeBrightness - displayNightModeBrightness ) * ( sensorBrightnessAverage - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) / ( SENSOR_BRIGHTNESS_DAY_LEVEL - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) );
+    displayCurrentBrightness = displayNightModeBrightness + static_cast<double>( displayDayModeBrightness - displayNightModeBrightness ) * ( sensorBrightnessAverage - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) / ( SENSOR_BRIGHTNESS_DAY_LEVEL - SENSOR_BRIGHTNESS_NIGHT_LEVEL );
   }
 }
 
@@ -470,27 +478,39 @@ void setDisplayBrightness( uint8_t displayNewBrightness ) {
 }
 
 void setDisplayBrightness( bool isInit ) {
-  unsigned long currentMillis = millis();
+  //unsigned long currentMillis = millis();
   bool updateDisplayBrightness = false;
+  uint8_t displayCurrentBrightnessInt = static_cast<uint8_t>( round( displayCurrentBrightness ) );
+  uint8_t displayPreviousBrightnessInt = static_cast<uint8_t>( round( displayPreviousBrightness ) );
 
-  if( isInit ) {
+  if( isInit || displayPreviousBrightness < 0 ) {
     updateDisplayBrightness = true;
-  } else if( displayCurrentBrightness != displayPreviousBrightness ) {
+  } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
+    double hysteresis = 0.1;
+    if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + hysteresis ) ) ) ||
+        ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - hysteresis ) ) ) ) {
+      updateDisplayBrightness = true;
+    }
+  }
+
+  /*if( isInit ) {
+    updateDisplayBrightness = true;
+  } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
     if( calculateDiffMillis( previousDisplayBrightnessToleranceUpdatedMillis, currentMillis ) < DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS ) {
       uint8_t diffTolerance = 1;
-      uint8_t brightnessDiff = displayCurrentBrightness > displayPreviousBrightness ? displayCurrentBrightness - displayPreviousBrightness : displayPreviousBrightness - displayCurrentBrightness;
+      uint8_t brightnessDiff = displayCurrentBrightnessInt > displayPreviousBrightnessInt ? displayCurrentBrightnessInt - displayPreviousBrightnessInt : displayPreviousBrightnessInt - displayCurrentBrightnessInt;
       if( brightnessDiff > diffTolerance ) {
         updateDisplayBrightness = true;
       }
     } else {
       updateDisplayBrightness = true;
     }
-  }
+  }*/
 
   if( updateDisplayBrightness ) {
-    setDisplayBrightness( displayCurrentBrightness );
+    setDisplayBrightness( displayCurrentBrightnessInt );
     displayPreviousBrightness = displayCurrentBrightness;
-    previousDisplayBrightnessToleranceUpdatedMillis = currentMillis;
+    //previousDisplayBrightnessToleranceUpdatedMillis = currentMillis;
   }
 }
 
@@ -509,6 +529,8 @@ void brightnessProcessLoopTick() {
   }
 }
 
+const uint8_t DISPLAY_WIDTH = 32;
+const uint8_t DISPLAY_HEIGHT = 8;
 
 bool isSemicolonShown = true;
 void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
@@ -516,15 +538,27 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
     uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
-    if( displayWidthUsed + charWidth > 32 ) {
-      charWidth = 32 - displayWidthUsed;
+    if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
+      charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
     std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
 
-    for( uint8_t charY = 0; charY < 8; ++charY ) {
+    for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
-        display.setPoint( charY, 32 - 1 - ( displayWidthUsed + charX ), ( charY < 8 - charImage.size() ) ? 0 : ( charImage[charY - 8 + charImage.size()] >> ( 8 - 1 - charX ) ) & 1 );
+        if( isRotateDisplay ) {
+          display.setPoint(
+            DISPLAY_HEIGHT - 1 - charY,
+            displayWidthUsed + charX,
+            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
+          );
+        } else {
+          display.setPoint(
+            charY,
+            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
+            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
+          );
+        }
       }
     }
     displayWidthUsed += charWidth;
@@ -533,24 +567,48 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplaySmall.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplaySmall.charAt( charToDisplayIndex );
     uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
-    if( displayWidthUsed + charWidth > 32 ) {
-      charWidth = 32 - displayWidthUsed;
+    if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
+      charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
     std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
 
-    for( uint8_t charY = 0; charY < 8; ++charY ) {
+    for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
-        display.setPoint( charY, 32 - 1 - ( displayWidthUsed + charX ), ( charY < 8 - charImage.size() ) ? 0 : ( charImage[charY - 8 + charImage.size()] >> ( 8 - 1 - charX ) ) & 1 );
+        if( isRotateDisplay ) {
+          display.setPoint(
+            DISPLAY_HEIGHT - 1 - charY,
+            displayWidthUsed + charX,
+            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
+          );
+        } else {
+          display.setPoint(
+            charY,
+            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
+            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
+          );
+        }
       }
     }
     displayWidthUsed += charWidth;
   }
 
-  if( displayWidthUsed < 32 ) { //fill the rest of the screen
-    for( uint8_t charY = 0; charY < 8; ++charY ) {
-      for( uint8_t charX = 0; charX < 32 - displayWidthUsed; ++charX ) {
-        display.setPoint( charY, 32 - 1 - ( displayWidthUsed + charX ), false );
+  if( displayWidthUsed < DISPLAY_WIDTH ) { //fill the rest of the screen
+    for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
+      for( uint8_t charX = 0; charX < DISPLAY_WIDTH - displayWidthUsed; ++charX ) {
+        if( isRotateDisplay ) {
+          display.setPoint(
+            DISPLAY_HEIGHT - 1 - charY,
+            displayWidthUsed + charX,
+            false
+          );
+        } else {
+          display.setPoint(
+            charY,
+            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
+            false
+          );
+        }
       }
     }
   }
@@ -558,9 +616,21 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
 
 void renderProgressIndicator( unsigned long timerRemainingMillis ) {
   if( !isProgressIndicatorShown ) return;
-  unsigned long numberOfDots = timerRemainingMillis == 0 ? 0 : ( timerRemainingMillis * ( 32 + 1 ) / timerCurrentSetupInMillis );
-  for( uint8_t charX = 0; charX < 32; ++charX ) {
-    display.setPoint( 0, 32 - 1 - ( charX ), charX < numberOfDots );
+  unsigned long numberOfDots = timerRemainingMillis == 0 ? 0 : ( timerRemainingMillis * ( DISPLAY_WIDTH + 1 ) / timerCurrentSetupInMillis );
+  for( uint8_t charX = 0; charX < DISPLAY_WIDTH; ++charX ) {
+    if( isRotateDisplay ) {
+      display.setPoint(
+        DISPLAY_HEIGHT - 1,
+        charX,
+        charX < numberOfDots
+      );
+    } else {
+      display.setPoint(
+        0,
+        DISPLAY_WIDTH - 1 - ( charX ),
+        charX < numberOfDots
+      );
+    }
   }
 }
 
@@ -573,7 +643,7 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( hour < 10 ? "0" : "" ) + String( hour );
+    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
     String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
@@ -589,7 +659,7 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( hour < 10 ? "0" : "" ) + String( hour );
+    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
     String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
@@ -603,7 +673,6 @@ void renderDisplay() {
       timerBlinkingLastUpdateMillis += TIMER_BLINKING_DELAY;
     }
 
-    //String textToDisplayLarge = isTimerBlinkingShown ? ( String( "00" ) + ( isSemicolonShown ? ":" : "\t" ) + String( "00" ) ) : ( String( "  " ) + ( isSemicolonShown ? ":" : "\t" ) + String( "  " ) );
     String textToDisplayLarge = isTimerBlinkingShown ? String( "00:00" ) : String( "  \t  " );
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
     renderDisplayText( textToDisplayLarge, textToDisplaySmall );
@@ -616,7 +685,7 @@ void renderDisplay() {
     if( hour >= 24 ) {
       hour = hour - 24;
     }
-    String hourStr = ( hour < 10 ? "0" : "" ) + String( hour );
+    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
     uint8_t minute = dtStruct->tm_min;
     String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
     uint8_t second = dtStruct->tm_sec;
@@ -757,7 +826,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
 "<html>"
   "<head>"
     "<meta charset=\"UTF-8\">"
-    "<title>Timer Clock</title>"
+    "<title>Таймер-годинник</title>"
     "<style>"
       ":root{--f:22px;}"
       "body{margin:0;background-color:#444;font-family:sans-serif;color:#FFF;}"
@@ -797,7 +866,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
   "</head>"
   "<body>"
     "<div class=\"wrp\">"
-      "<h2>Timer Clock<div class=\"lnk\" style=\"font-size:50%;\">By <a href=\"mailto:kurylo.press@gmail.com?subject=Timer Clock\">Dmytro Kurylo</a></div></h2>";
+      "<h2>ТАЙМЕР-ГОДИННИК<div class=\"lnk\" style=\"font-size:50%;\">Розробник: <a href=\"mailto:kurylo.press@gmail.com?subject=Timer Clock\">Дмитро Курило</a></div></h2>";
 const char HTML_PAGE_END[] PROGMEM = "</div>"
   "</body>"
 "</html>";
@@ -867,6 +936,8 @@ const char* HTML_PAGE_TIMER_TURN_AMOUNT_NAME = "ttu";
 const char* HTML_PAGE_TIMER_BLINKING_TIME_NAME = "tbl";
 const char* HTML_PAGE_TIMER_BEEPING_TIME_NAME = "tbe";
 const char* HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME = "tpi";
+const char* HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME = "sdh";
+const char* HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME = "rt";
 
 const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
 const char* HTML_PAGE_BOLD_FONT_NAME = "bld";
@@ -879,41 +950,43 @@ void handleWebServerGet() {
 String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.children).forEach(ch=>{if(ch.classList.contains(\"ex\"))ch.classList.toggle(\"exon\");});}</script>"
   "<form method=\"POST\">"
   "<div class=\"fx\">"
-    "<h2>Connect to WiFi:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID Name"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), true, false ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID Password"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), true, false ) + String( F("</div>"
+    "<h2>Приєднатись до WiFi:</h2>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), true, false ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), true, false ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
-    "<h2>Timer Settings:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Setup timeout (secs)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Last timer memory (mins)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button press (mins)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Button turn (secs)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Blink time (mins)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Beep time (secs)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show timer progress bar"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
+    "<h2>Налаштування таймера:</h2>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
-    "<h2>Display Settings:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Font typeface"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Bold font"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Show seconds"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Day brightness"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Night brightness"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
+    "<h2>Налаштування дисплею:</h2>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Години 0-9 без 0 (8:30 замість 08:30)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути дисплей на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
   "</div>"
   "<div class=\"fx ft\">"
-    "<div class=\"fi\"><button type=\"submit\">Apply</button></div>"
+    "<div class=\"fi\"><button type=\"submit\">Застосувати</button></div>"
   "</div>"
 "</form>"
 "<div class=\"fx ft\">"
   "<span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TEST_NIGHT_ENDPOINT, F("Test Dimming") ) + String( F("<span class=\"i\" title=\"Apply your settings before testing!\"></span></span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Test LEDs") ) + String( F("</span>"
+    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TEST_NIGHT_ENDPOINT, F("Перевірити нічний режим") ) + String( F("<span class=\"i\" title=\"Застосуйте налаштування перед перевіркою!\"></span></span>"
+    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Перевірити матрицю") ) + String( F("</span>"
   "</span>"
   "<span class=\"lnk\"></span>"
   "<span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_UPDATE_ENDPOINT, F("Update FW") ) + String( F("<span class=\"i\" title=\"Current version: ") ) + String( getFirmwareVersion() ) + String( F("\"></span></span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Reboot") ) + String( F("</span>"
+    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_UPDATE_ENDPOINT, F("Оновити прошивку") ) + String( F("<span class=\"i\" title=\"Поточна версія: ") ) + String( getFirmwareVersion() ) + String( F("\"></span></span>"
+    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Перезавантажити") ) + String( F("</span>"
   "</span>"
 "</div>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
@@ -1063,6 +1136,28 @@ void handleWebServerPost() {
     isDisplaySecondsShownReceivedPopulated = true;
   }
 
+  String htmlPageIsSingleDigitHourShownReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME );
+  bool isSingleDigitHourShownReceived = false;
+  bool isSingleDigitHourShownReceivedPopulated = false;
+  if( htmlPageIsSingleDigitHourShownReceived == "on" ) {
+    isSingleDigitHourShownReceived = true;
+    isSingleDigitHourShownReceivedPopulated = true;
+  } else if( htmlPageIsSingleDigitHourShownReceived == "" ) {
+    isSingleDigitHourShownReceived = false;
+    isSingleDigitHourShownReceivedPopulated = true;
+  }
+
+  String htmlPageIsRotateDisplayReceived = wifiWebServer.arg( HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME );
+  bool isRotateDisplayReceived = false;
+  bool isRotateDisplayReceivedPopulated = false;
+  if( htmlPageIsRotateDisplayReceived == "on" ) {
+    isRotateDisplayReceived = true;
+    isRotateDisplayReceivedPopulated = true;
+  } else if( htmlPageIsRotateDisplayReceived == "" ) {
+    isRotateDisplayReceived = false;
+    isRotateDisplayReceivedPopulated = true;
+  }
+
   String htmlPageDisplayDayModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_NAME );
   uint displayDayModeBrightnessReceived = htmlPageDisplayDayModeBrightnessReceived.toInt();
   bool displayDayModeBrightnessReceivedPopulated = false;
@@ -1075,12 +1170,15 @@ void handleWebServerPost() {
   bool displayNightModeBrightnessReceivedPopulated = false;
   if( displayNightModeBrightnessReceived > 0 || displayNightModeBrightnessReceived <= 15 ) {
     displayNightModeBrightnessReceivedPopulated = true;
+    if( displayNightModeBrightnessReceived > displayDayModeBrightnessReceived ) {
+      displayNightModeBrightnessReceived = displayDayModeBrightnessReceived;
+    }
   }
 
   bool isWiFiChanged = strcmp( wiFiClientSsid, htmlPageSsidNameReceived.c_str() ) != 0 || strcmp( wiFiClientPassword, htmlPageSsidPasswordReceived.c_str() ) != 0;
 
   String waitTime = isWiFiChanged ? String(TIMEOUT_CONNECT_WIFI_SYNC/1000 + 6) : "2";
-  String content = getHtmlPage( getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Save successful</h2>") ) );
+  String content = getHtmlPage( getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Зберігаю...</h2>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
 
@@ -1152,6 +1250,20 @@ void handleWebServerPost() {
     writeEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShownReceived );
   }
 
+  if( isSingleDigitHourShownReceivedPopulated && isSingleDigitHourShownReceived != isSingleDigitHourShown ) {
+    isSingleDigitHourShown = isSingleDigitHourShownReceived;
+    isDisplayRerenderRequired = true;
+    Serial.println( F("Show single digit hour updated") );
+    writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShownReceived );
+  }
+
+  if( isRotateDisplayReceivedPopulated && isRotateDisplayReceived != isRotateDisplay ) {
+    isRotateDisplay = isRotateDisplayReceived;
+    isDisplayRerenderRequired = true;
+    Serial.println( F("Display rotation updated") );
+    writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplayReceived );
+  }
+
   if( displayDayModeBrightnessReceivedPopulated && displayDayModeBrightnessReceived != displayDayModeBrightness ) {
     displayDayModeBrightness = displayDayModeBrightnessReceived;
     isDisplayIntensityUpdateRequired = true;
@@ -1187,7 +1299,7 @@ void handleWebServerPost() {
 }
 
 void handleWebServerGetTestNight() {
-  String content = getHtmlPage( getHtmlPageFillup( "5", "5" ) + String( F("<h2>Testing Night Mode...</h2>") ) );
+  String content = getHtmlPage( getHtmlPageFillup( "5", "5" ) + String( F("<h2>Перевіряю нічний режим...</h2>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
     setDisplayBrightness( displayNightModeBrightness );
@@ -1198,7 +1310,7 @@ void handleWebServerGetTestNight() {
 }
 
 void handleWebServerGetTestLeds() {
-  String content = getHtmlPage( getHtmlPageFillup( "12", "12" ) + String( F("<h2>Testing LEDs...</h2>") ) );
+  String content = getHtmlPage( getHtmlPageFillup( "12", "12" ) + String( F("<h2>Перевіряю матрицю...</h2>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
   for( uint8_t row = 0; row < 8; ++row ) {
@@ -1229,7 +1341,7 @@ void handleWebServerGetTestLeds() {
 }
 
 void handleWebServerGetReboot() {
-  String content = getHtmlPage( getHtmlPageFillup( "9", "9" ) + String( F("<h2>Rebooting...</h2>") ) );
+  String content = getHtmlPage( getHtmlPageFillup( "9", "9" ) + String( F("<h2>Перезавантажуюсь...</h2>") ) );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
   delay( 200 );
