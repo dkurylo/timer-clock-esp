@@ -121,8 +121,8 @@ bool isRotateDisplay = false;
 
 //brightness settings
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 30;
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 130;
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 300;
 
 
 #ifdef ESP8266
@@ -462,7 +462,6 @@ void calculateDisplayBrightness() {
     uint8_t sensorBrightnessSamples = 50;
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
   }
-
   if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
     displayCurrentBrightness = static_cast<double>(displayDayModeBrightness);
   } else if( sensorBrightnessAverage <= SENSOR_BRIGHTNESS_NIGHT_LEVEL ) {
