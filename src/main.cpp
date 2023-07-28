@@ -67,7 +67,7 @@ const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
 const uint16_t TIMEOUT_NTP_CLIENT_CONNECT = 2500;
 const uint16_t DELAY_NTP_UPDATED_CHECK = 10000;
 const uint32_t DELAY_NTP_TIME_SYNC = 3600000;
-const bool SEMICOLON_ANIMATION_FAST = true; //semicolon period, true = 60 blinks per minute; false = 30 blinks per minute
+bool isSlowSemicolonAnimation = false; //semicolon period, false = 60 blinks per minute; true = 30 blinks per minute
 const uint16_t DELAY_DISPLAY_ANIMATION = 50; //led animation speed, in ms
 
 //timer settings
@@ -80,7 +80,7 @@ uint8_t timerLongBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN 
 uint8_t timerShortBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
 const bool IS_LOW_LEVEL_BUZZER = true;
 
-uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 10 * 1000;
+const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
 
 uint32_t timerOldSetupInMillis = 0; //amount of time which was used last time in timer; will be used within timerRememberLastInputTimeMinutes seconds
 unsigned long timerOldFinishedTimeMillis = 0; //time when the last timer has been finished; used to determine the timerRememberLastInputTimeMinutes
@@ -196,7 +196,8 @@ const uint16_t eepromTimerBeepingTimeIndex = eepromTimerBlinkingTimeIndex + 1;
 const uint16_t eepromTimerIsProgressIndicatorShownIndex = eepromTimerBeepingTimeIndex + 1;
 const uint16_t eepromIsSingleDigitHourShownIndex = eepromTimerIsProgressIndicatorShownIndex + 1;
 const uint16_t eepromIsRotateDisplayIndex = eepromIsSingleDigitHourShownIndex + 1;
-const uint16_t eepromLastByteIndex = eepromIsRotateDisplayIndex + 1;
+const uint16_t eepromIsSlowSemicolonAnimationIndex = eepromIsRotateDisplayIndex + 1;
+const uint16_t eepromLastByteIndex = eepromIsSlowSemicolonAnimationIndex + 1;
 
 const uint16_t EEPROM_ALLOCATED_SIZE = eepromLastByteIndex;
 void initEeprom() {
@@ -293,6 +294,7 @@ void loadEepromData() {
     readEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown, true );
     readEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown, true );
     readEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay, true );
+    readEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation, true );
 
   } else { //fill EEPROM with default values when starting the new board
     writeEepromBoolValue( eepromIsNewBoardIndex, false );
@@ -315,6 +317,7 @@ void loadEepromData() {
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown );
     writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay );
+    writeEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation );
 
     isNewBoard = false;
   }
@@ -462,6 +465,7 @@ void calculateDisplayBrightness() {
     uint8_t sensorBrightnessSamples = 50;
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
   }
+
   if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
     displayCurrentBrightness = static_cast<double>(displayDayModeBrightness);
   } else if( sensorBrightnessAverage <= SENSOR_BRIGHTNESS_NIGHT_LEVEL ) {
@@ -941,6 +945,7 @@ const char* HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME = "rt";
 const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
 const char* HTML_PAGE_BOLD_FONT_NAME = "bld";
 const char* HTML_PAGE_SHOW_SECS_NAME = "sec";
+const char* HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME = "ssa";
 const char* HTML_PAGE_BRIGHTNESS_DAY_NAME = "brtd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_NAME = "brtn";
 
@@ -964,11 +969,12 @@ String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.chi
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
-    "<h2>Налаштування дисплею:</h2>"
+    "<h2>Налаштування дисплея:</h2>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Години 0-9 без 0 (8:30 замість 08:30)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути дисплей на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
@@ -1157,6 +1163,17 @@ void handleWebServerPost() {
     isRotateDisplayReceivedPopulated = true;
   }
 
+  String htmlPageIsSlowSemicolonAnimationReceived = wifiWebServer.arg( HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME );
+  bool isSlowSemicolonAnimationReceived = false;
+  bool isSlowSemicolonAnimationReceivedPopulated = false;
+  if( htmlPageIsSlowSemicolonAnimationReceived == "on" ) {
+    isSlowSemicolonAnimationReceived = true;
+    isSlowSemicolonAnimationReceivedPopulated = true;
+  } else if( htmlPageIsSlowSemicolonAnimationReceived == "" ) {
+    isSlowSemicolonAnimationReceived = false;
+    isSlowSemicolonAnimationReceivedPopulated = true;
+  }
+
   String htmlPageDisplayDayModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_NAME );
   uint displayDayModeBrightnessReceived = htmlPageDisplayDayModeBrightnessReceived.toInt();
   bool displayDayModeBrightnessReceivedPopulated = false;
@@ -1261,6 +1278,13 @@ void handleWebServerPost() {
     isDisplayRerenderRequired = true;
     Serial.println( F("Display rotation updated") );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplayReceived );
+  }
+
+  if( isSlowSemicolonAnimationReceivedPopulated && isSlowSemicolonAnimationReceived != isSlowSemicolonAnimation ) {
+    isSlowSemicolonAnimation = isSlowSemicolonAnimationReceived;
+    isDisplayRerenderRequired = true;
+    Serial.println( F("Display semicolon speed updated") );
+    writeEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimationReceived );
   }
 
   if( displayDayModeBrightnessReceivedPopulated && displayDayModeBrightnessReceived != displayDayModeBrightness ) {
@@ -1768,13 +1792,13 @@ void loop() {
         isForceDisplaySync = false;
       } else if( timeClient.isTimeSet() ) {
         unsigned long timeClientSecondsCurrent = timeClient.getEpochTime();
-        if( !SEMICOLON_ANIMATION_FAST ) {
+        if( isSlowSemicolonAnimation ) {
           isSemicolonShown = timeClientSecondsCurrent % 2 == 0;
         } else { //else if 500 let it remain blank until the next second comes
           isSemicolonShown = false;
         }
         if( timeClientInitStatusChanged || timeClientSecondsAtDisplaySyncStart != timeClientSecondsCurrent ) {
-          if( SEMICOLON_ANIMATION_FAST ) {
+          if( !isSlowSemicolonAnimation ) {
             isSemicolonShown = true;
           }
           previousMillisSemicolonAnimation = currentMillis;
@@ -1791,9 +1815,9 @@ void loop() {
       }
     } else {
       previousMillisDisplayAnimation += DELAY_DISPLAY_ANIMATION;
-      if( calculateDiffMillis( previousMillisSemicolonAnimation, currentMillis ) >= ( SEMICOLON_ANIMATION_FAST ? 500 : 1000 ) ) {
+      if( calculateDiffMillis( previousMillisSemicolonAnimation, currentMillis ) >= ( isSlowSemicolonAnimation ? 1000 : 500 ) ) {
         isSemicolonShown = !isSemicolonShown;
-        previousMillisSemicolonAnimation += ( SEMICOLON_ANIMATION_FAST ? 500 : 1000 );
+        previousMillisSemicolonAnimation += ( isSlowSemicolonAnimation ? 1000 : 500 );
       }
     }
 
