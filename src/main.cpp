@@ -68,7 +68,7 @@ const uint16_t TIMEOUT_NTP_CLIENT_CONNECT = 2500;
 const uint16_t DELAY_NTP_UPDATED_CHECK = 10000;
 const uint32_t DELAY_NTP_TIME_SYNC = 3600000;
 bool isSlowSemicolonAnimation = false; //semicolon period, false = 60 blinks per minute; true = 30 blinks per minute
-const uint16_t DELAY_DISPLAY_ANIMATION = 50; //led animation speed, in ms
+const uint16_t DELAY_DISPLAY_ANIMATION = 20; //led animation speed, in ms
 
 //timer settings
 uint8_t timerSetupResetTimeSeconds = 30; //CONFIGURABLE amount of time IN SECONDS, if not touched within this amount of time, timer setup will return to clock mode
@@ -118,9 +118,12 @@ bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
 bool isSingleDigitHourShown = false;
 bool isRotateDisplay = false;
+bool isTimerAnimated = false;
+bool isClockAnimated = false;
+uint8_t animationTypeNumber = 0;
 
 //brightness settings
-const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
+const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
 const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
 const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 300;
 
@@ -197,7 +200,10 @@ const uint16_t eepromTimerIsProgressIndicatorShownIndex = eepromTimerBeepingTime
 const uint16_t eepromIsSingleDigitHourShownIndex = eepromTimerIsProgressIndicatorShownIndex + 1;
 const uint16_t eepromIsRotateDisplayIndex = eepromIsSingleDigitHourShownIndex + 1;
 const uint16_t eepromIsSlowSemicolonAnimationIndex = eepromIsRotateDisplayIndex + 1;
-const uint16_t eepromLastByteIndex = eepromIsSlowSemicolonAnimationIndex + 1;
+const uint16_t eepromIsTimerAnimatedIndex = eepromIsSlowSemicolonAnimationIndex + 1;
+const uint16_t eepromIsClockAnimatedIndex = eepromIsTimerAnimatedIndex + 1;
+const uint16_t eepromAnimationTypeNumberIndex = eepromIsClockAnimatedIndex + 1;
+const uint16_t eepromLastByteIndex = eepromAnimationTypeNumberIndex + 1;
 
 const uint16_t EEPROM_ALLOCATED_SIZE = eepromLastByteIndex;
 void initEeprom() {
@@ -295,6 +301,9 @@ void loadEepromData() {
     readEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown, true );
     readEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay, true );
     readEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation, true );
+    readEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimated, true );
+    readEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimated, true );
+    readEepromIntValue( eepromAnimationTypeNumberIndex, animationTypeNumber, true );
 
   } else { //fill EEPROM with default values when starting the new board
     writeEepromBoolValue( eepromIsNewBoardIndex, false );
@@ -318,6 +327,9 @@ void loadEepromData() {
     writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay );
     writeEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation );
+    writeEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimated );
+    writeEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimated );
+    writeEepromIntValue( eepromAnimationTypeNumberIndex, animationTypeNumber );
 
     isNewBoard = false;
   }
@@ -462,7 +474,7 @@ void calculateDisplayBrightness() {
   if( sensorBrightnessAverage < 0 ) {
     sensorBrightnessAverage = currentBrightness;
   } else {
-    uint8_t sensorBrightnessSamples = 50;
+    uint8_t sensorBrightnessSamples = 25;
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
   }
 
@@ -489,7 +501,7 @@ void setDisplayBrightness( bool isInit ) {
   if( isInit || displayPreviousBrightness < 0 ) {
     updateDisplayBrightness = true;
   } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
-    double hysteresis = 0.1;
+    double hysteresis = 0.15;
     if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + hysteresis ) ) ) ||
         ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - hysteresis ) ) ) ) {
       updateDisplayBrightness = true;
@@ -535,8 +547,55 @@ void brightnessProcessLoopTick() {
 const uint8_t DISPLAY_WIDTH = 32;
 const uint8_t DISPLAY_HEIGHT = 8;
 
+String textToDisplayLargeAnimated = "";
+bool isDisplayAnimationInProgress = false;
+unsigned long displayAnimationStartedMillis;
+const unsigned long displayAnimationStepLengthMillis = 40;
+
 bool isSemicolonShown = true;
-void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
+void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bool doAnimate ) {
+  unsigned long currentMillis = millis();
+
+  char charsAnimatable[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+  uint8_t charsAnimatableCount = sizeof(charsAnimatable) / sizeof(charsAnimatable[0]);
+  unsigned long displayAnimationLengthMillis = ( ( isTimerRunning && isProgressIndicatorShown ) ? 6 : 8 ) * displayAnimationStepLengthMillis;
+  if( animationTypeNumber == 0 || animationTypeNumber == 1 ) {
+    displayAnimationLengthMillis += displayAnimationStepLengthMillis;
+  }
+
+  if( !doAnimate ) {
+    textToDisplayLargeAnimated = "";
+    isDisplayAnimationInProgress = false;
+  } else if( textToDisplayLargeAnimated == "" ) {
+    textToDisplayLargeAnimated = textToDisplayLarge;
+    isDisplayAnimationInProgress = false;
+  } else if( !isDisplayAnimationInProgress ) {
+    if( textToDisplayLarge.length() == textToDisplayLargeAnimated.length() ) {
+      bool doAnimate = false;
+      for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
+        char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
+        bool isAnimatable = false;
+        for( uint8_t i = 0; i < charsAnimatableCount; i++ ) {
+          if( charToDisplay != charsAnimatable[i] ) continue;
+          isAnimatable = true;
+          break;
+        }
+        if( !isAnimatable || textToDisplayLargeAnimated.charAt( charToDisplayIndex ) == charToDisplay ) continue;
+        doAnimate = true;
+        break;
+      }
+      if( doAnimate ) {
+        isDisplayAnimationInProgress = true;
+        displayAnimationStartedMillis = currentMillis;
+      }
+    } else {
+      textToDisplayLargeAnimated = textToDisplayLarge;
+    }
+  } else if( isDisplayAnimationInProgress && calculateDiffMillis( displayAnimationStartedMillis, currentMillis ) > displayAnimationLengthMillis ) {
+    isDisplayAnimationInProgress = false;
+    textToDisplayLargeAnimated = textToDisplayLarge;
+  }
+
   uint8_t displayWidthUsed = 0;
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
@@ -546,22 +605,64 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
     }
     if( charWidth == 0 ) continue;
     std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
-
-    for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
-      for( uint8_t charX = 0; charX < charWidth; ++charX ) {
-        if( isRotateDisplay ) {
-          display.setPoint(
-            DISPLAY_HEIGHT - 1 - charY,
-            displayWidthUsed + charX,
-            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
-          );
-        } else {
-          display.setPoint(
-            charY,
-            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
-            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
-          );
+    std::vector<uint8_t> charImagePrevious;
+    if( isDisplayAnimationInProgress ) {
+      bool isAnimatable = false;
+      for( uint8_t i = 0; i < charsAnimatableCount; i++ ) {
+        if( charToDisplay != charsAnimatable[i] ) continue;
+        isAnimatable = true;
+        break;
+      }
+      if( isAnimatable && charToDisplayIndex < textToDisplayLargeAnimated.length() ) {
+        char charToDisplayPrevious = textToDisplayLargeAnimated.charAt( charToDisplayIndex );
+        if( charToDisplay != charToDisplayPrevious ) {
+          charImagePrevious = TCFonts::getSymbol( displayFontTypeNumber, charToDisplayPrevious, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
         }
+      }
+    }
+
+    for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
+      for( uint8_t charX = 0; charX < charWidth; ++charX ) {
+        bool isPointEnabled = false;
+        uint8_t charShiftY = DISPLAY_HEIGHT - charImage.size();
+        if( displayY >= charShiftY ) {
+          uint8_t charY = displayY - charShiftY;
+          isPointEnabled = ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1;
+          if( isDisplayAnimationInProgress && charImagePrevious.size() > 0 ) {
+            uint8_t animationSteps = charImage.size();
+            if( animationTypeNumber == 0 || animationTypeNumber == 1 ) {
+              animationSteps++;
+            }
+            unsigned long animationStepSize = displayAnimationLengthMillis / animationSteps;
+            int currentAnimationStep = calculateDiffMillis( displayAnimationStartedMillis, currentMillis ) / animationStepSize;
+            if( currentAnimationStep >= animationSteps ) {
+              currentAnimationStep = animationSteps - 1;
+            }
+            if( animationTypeNumber == 0 ) {
+              isPointEnabled = currentAnimationStep == charY
+                               ? 0
+                               : ( currentAnimationStep < charY
+                                 ? ( ( charImagePrevious[charY - currentAnimationStep - 1] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 )
+                                 : ( ( charImage[charY + charImage.size() - currentAnimationStep] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 ) );
+            } else if( animationTypeNumber == 1 ) {
+              isPointEnabled = currentAnimationStep == charY
+                               ? 0
+                               : ( currentAnimationStep < charY
+                                   ? ( ( charImagePrevious[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 )
+                                   : ( ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 ) );
+
+            } else if( animationTypeNumber == 2 ) {
+              isPointEnabled = currentAnimationStep < charY
+                                ? ( ( charImagePrevious[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 )
+                                : ( ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1 );
+            }
+          }
+        }
+        display.setPoint(
+          isRotateDisplay ? ( DISPLAY_HEIGHT - 1 - displayY ) : ( displayY ),
+          isRotateDisplay ? ( displayWidthUsed + charX ) : ( DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ) ),
+          isPointEnabled
+        );
       }
     }
     displayWidthUsed += charWidth;
@@ -576,21 +677,19 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
     if( charWidth == 0 ) continue;
     std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
 
-    for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
+    for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
-        if( isRotateDisplay ) {
-          display.setPoint(
-            DISPLAY_HEIGHT - 1 - charY,
-            displayWidthUsed + charX,
-            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
-          );
-        } else {
-          display.setPoint(
-            charY,
-            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
-            ( charY < DISPLAY_HEIGHT - charImage.size() ) ? 0 : ( charImage[charY - DISPLAY_HEIGHT + charImage.size()] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1
-          );
+        bool isPointEnabled = false;
+        uint8_t charShiftY = DISPLAY_HEIGHT - charImage.size();
+        if( displayY >= charShiftY ) {
+          uint8_t charY = displayY - charShiftY;
+          isPointEnabled = ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1;
         }
+        display.setPoint(
+          isRotateDisplay ? ( DISPLAY_HEIGHT - 1 - displayY ) : ( displayY ),
+          isRotateDisplay ? ( displayWidthUsed + charX ) : ( DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ) ),
+          isPointEnabled
+        );
       }
     }
     displayWidthUsed += charWidth;
@@ -599,19 +698,11 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall ) {
   if( displayWidthUsed < DISPLAY_WIDTH ) { //fill the rest of the screen
     for( uint8_t charY = 0; charY < DISPLAY_HEIGHT; ++charY ) {
       for( uint8_t charX = 0; charX < DISPLAY_WIDTH - displayWidthUsed; ++charX ) {
-        if( isRotateDisplay ) {
-          display.setPoint(
-            DISPLAY_HEIGHT - 1 - charY,
-            displayWidthUsed + charX,
-            false
-          );
-        } else {
-          display.setPoint(
-            charY,
-            DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ),
-            false
-          );
-        }
+        display.setPoint(
+          isRotateDisplay ? ( DISPLAY_HEIGHT - 1 - charY ) : ( charY ),
+          isRotateDisplay ? ( displayWidthUsed + charX ) : ( DISPLAY_WIDTH - 1 - ( displayWidthUsed + charX ) ),
+          false
+        );
       }
     }
   }
@@ -621,19 +712,11 @@ void renderProgressIndicator( unsigned long timerRemainingMillis ) {
   if( !isProgressIndicatorShown ) return;
   unsigned long numberOfDots = timerRemainingMillis == 0 ? 0 : ( timerRemainingMillis * ( DISPLAY_WIDTH + 1 ) / timerCurrentSetupInMillis );
   for( uint8_t charX = 0; charX < DISPLAY_WIDTH; ++charX ) {
-    if( isRotateDisplay ) {
-      display.setPoint(
-        DISPLAY_HEIGHT - 1,
-        charX,
-        charX < numberOfDots
-      );
-    } else {
-      display.setPoint(
-        0,
-        DISPLAY_WIDTH - 1 - ( charX ),
-        charX < numberOfDots
-      );
-    }
+    display.setPoint(
+      isRotateDisplay ? ( DISPLAY_HEIGHT - 1 ) : ( 0 ),
+      isRotateDisplay ? ( charX ) : ( DISPLAY_WIDTH - 1 - ( charX ) ),
+      charX < numberOfDots
+    );
   }
 }
 
@@ -652,7 +735,7 @@ void renderDisplay() {
 
     String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + ( isSemicolonShown ? "\b" : "\f" ) + minuteStr ) : ( minuteStr + ( isSemicolonShown ? "\b" : "\f" ) + secondStr );
     String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isTimerAnimated );
     renderProgressIndicator( timerRemainingMillis );
 
   } else if( isTimerSetupRunning ) {
@@ -668,7 +751,7 @@ void renderDisplay() {
 
     String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + String( ":" ) + minuteStr ) : ( minuteStr + String( ":" ) + secondStr );
     String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
 
   } else if( isTimerBlinking ) {
     if( calculateDiffMillis( timerBlinkingLastUpdateMillis, millis() ) >= TIMER_BLINKING_DELAY ) {
@@ -678,7 +761,7 @@ void renderDisplay() {
 
     String textToDisplayLarge = isTimerBlinkingShown ? String( "00:00" ) : String( "  \t  " );
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
 
   } else if( timeClient.isTimeSet() ) {
     time_t dt = timeClient.getEpochTime();
@@ -696,11 +779,11 @@ void renderDisplay() {
 
     String textToDisplayLarge = hourStr + ( isSemicolonShown ? ":" : "\t" ) + minuteStr;
     String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isClockAnimated );
   } else {
     String textToDisplayLarge = String( "  " ) + ( isSemicolonShown ? ":" : "\t" ) + String( "  " );
     String textToDisplaySmall = isDisplaySecondsShown ? String( "  " ) : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
   }
   display.update();
 }
@@ -874,20 +957,20 @@ const char HTML_PAGE_END[] PROGMEM = "</div>"
   "</body>"
 "</html>";
 
-String getHtmlPage( String pageBody ) {
-  String result;
-  result.reserve( strlen_P(HTML_PAGE_START) + pageBody.length() + strlen_P(HTML_PAGE_END) + 1 );
+void addHtmlPageStart( String& pageBody ) {
   char c;
   for( uint16_t i = 0; i < strlen_P(HTML_PAGE_START); i++ ) {
     c = pgm_read_byte( &HTML_PAGE_START[i] );
-    result += c;
+    pageBody += c;
   }
-  result += pageBody;
+}
+
+void addHtmlPageEnd( String& pageBody ) {
+  char c;
   for( uint16_t i = 0; i < strlen_P(HTML_PAGE_END); i++ ) {
     c = pgm_read_byte( &HTML_PAGE_END[i] );
-    result += c;
+    pageBody += c;
   }
-  return result;
 }
 
 String getHtmlLink( const char* href, String label ) {
@@ -928,6 +1011,7 @@ const char* HTML_PAGE_REBOOT_ENDPOINT = "/reboot";
 const char* HTML_PAGE_TESTLED_ENDPOINT = "/testled";
 const char* HTML_PAGE_TEST_NIGHT_ENDPOINT = "/testdim";
 const char* HTML_PAGE_UPDATE_ENDPOINT = "/update";
+const char* HTML_PAGE_FAVICON_ENDPOINT = "/favicon.ico";
 
 const char* HTML_PAGE_WIFI_SSID_NAME = "ssid";
 const char* HTML_PAGE_WIFI_PWD_NAME = "pwd";
@@ -939,19 +1023,24 @@ const char* HTML_PAGE_TIMER_TURN_AMOUNT_NAME = "ttu";
 const char* HTML_PAGE_TIMER_BLINKING_TIME_NAME = "tbl";
 const char* HTML_PAGE_TIMER_BEEPING_TIME_NAME = "tbe";
 const char* HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME = "tpi";
+const char* HTML_PAGE_TIMER_ANIMATED_NAME = "ta";
+
 const char* HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME = "sdh";
-const char* HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME = "rt";
+const char* HTML_PAGE_CLOCK_ANIMATED_NAME = "ca";
 
 const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
 const char* HTML_PAGE_BOLD_FONT_NAME = "bld";
 const char* HTML_PAGE_SHOW_SECS_NAME = "sec";
 const char* HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME = "ssa";
+const char* HTML_PAGE_ROTATE_DISPLAY_NAME = "rt";
+const char* HTML_PAGE_ANIMATION_TYPE_NAME = "at";
 const char* HTML_PAGE_BRIGHTNESS_DAY_NAME = "brtd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_NAME = "brtn";
 
 void handleWebServerGet() {
-  String content = getHtmlPage(
-String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.children).forEach(ch=>{if(ch.classList.contains(\"ex\"))ch.classList.toggle(\"exon\");});}</script>"
+  String content;
+  addHtmlPageStart( content );
+  content += String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.children).forEach(ch=>{if(ch.classList.contains(\"ex\"))ch.classList.toggle(\"exon\");});}</script>"
   "<form method=\"POST\">"
   "<div class=\"fx\">"
     "<h2>Приєднатись до WiFi:</h2>"
@@ -967,15 +1056,21 @@ String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.chi
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, false, isTimerAnimated ) + String( F("</div>"
+  "</div>"
+  "<div class=\"fx\">"
+    "<h2>Налаштування годинника:</h2>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Години 0-9 без 0 (8:30 замість 08:30)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, false, isClockAnimated ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Години 0-9 без 0 (8:30 замість 08:30)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути дисплей на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
   "</div>"
@@ -983,17 +1078,22 @@ String( F("<script>function ex(el){Array.from(el.parentElement.parentElement.chi
     "<div class=\"fi\"><button type=\"submit\">Застосувати</button></div>"
   "</div>"
 "</form>"
-"<div class=\"fx ft\">"
-  "<span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TEST_NIGHT_ENDPOINT, F("Перевірити нічний режим") ) + String( F("<span class=\"i\" title=\"Застосуйте налаштування перед перевіркою!\"></span></span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Перевірити матрицю") ) + String( F("</span>"
-  "</span>"
-  "<span class=\"lnk\"></span>"
-  "<span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_UPDATE_ENDPOINT, F("Оновити прошивку") ) + String( F("<span class=\"i\" title=\"Поточна версія: ") ) + String( getFirmwareVersion() ) + String( F("\"></span></span>"
-    "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Перезавантажити") ) + String( F("</span>"
-  "</span>"
-"</div>") ) );
+"<div class=\"ft\">"
+  "<div class=\"fx\">"
+    "<span>"
+      "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TEST_NIGHT_ENDPOINT, F("Перевірити нічний режим") ) + String( F("<span class=\"i\" title=\"Застосуйте налаштування перед перевіркою!\"></span></span>"
+      "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_TESTLED_ENDPOINT, F("Перевірити матрицю") ) + String( F("</span>"
+    "</span>"
+  "</div>"
+  "<div class=\"fx\">"
+    "<span>"
+      "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_UPDATE_ENDPOINT, F("Оновити прошивку") ) + String( F("<span class=\"i\" title=\"Поточна версія: ") ) + String( getFirmwareVersion() ) + String( F("\"></span></span>"
+      "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Перезавантажити") ) + String( F("</span>"
+    "</span>"
+  "</div>"
+"</div>") );
+  addHtmlPageEnd( content );
+
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
 }
@@ -1029,29 +1129,39 @@ String getHtmlPageFillup( String animationLength, String redirectLength ) {
 }
 
 void handleWebServerPost() {
+  String content;
+
   String htmlPageSsidNameReceived = wifiWebServer.arg( HTML_PAGE_WIFI_SSID_NAME );
   String htmlPageSsidPasswordReceived = wifiWebServer.arg( HTML_PAGE_WIFI_PWD_NAME );
 
   if( htmlPageSsidNameReceived.length() == 0 ) {
-    String content = getHtmlPage( String( F("<h2>Error: Missing SSID Name</h2>") ) );
+    addHtmlPageStart( content );
+    content += String( F("<h2>Error: Missing SSID Name</h2>") );
+    addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
     wifiWebServer.send( 400, F("text/html"), content );
     return;
   }
   if( htmlPageSsidPasswordReceived.length() == 0 ) {
-    String content = getHtmlPage( String( F("<h2>Error: Missing SSID Password</h2>") ) );
+    addHtmlPageStart( content );
+    content += String( F("<h2>Error: Missing SSID Password</h2>") );
+    addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
     wifiWebServer.send( 400, F("text/html"), content );
     return;
   }
   if( htmlPageSsidNameReceived.length() > getWiFiClientSsidNameMaxLength() ) {
-    String content = getHtmlPage( String( F("<h2>Error: SSID Name exceeds maximum length of ") ) + String( getWiFiClientSsidNameMaxLength() ) + String( F("</h2>") ) );
+    addHtmlPageStart( content );
+    content += String( F("<h2>Error: SSID Name exceeds maximum length of ") ) + String( getWiFiClientSsidNameMaxLength() ) + String( F("</h2>") );
+    addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
     wifiWebServer.send( 400, F("text/html"), content );
     return;
   }
   if( htmlPageSsidPasswordReceived.length() > getWiFiClientSsidPasswordMaxLength() ) {
-    String content = getHtmlPage( String( F("<h2>Error: SSID Password exceeds maximum length of ") ) + String( getWiFiClientSsidPasswordMaxLength() ) + String( F("</h2>") ) );
+    addHtmlPageStart( content );
+    content += String( F("<h2>Error: SSID Password exceeds maximum length of ") ) + String( getWiFiClientSsidPasswordMaxLength() ) + String( F("</h2>") );
+    addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
     wifiWebServer.send( 400, F("text/html"), content );
     return;
@@ -1111,11 +1221,45 @@ void handleWebServerPost() {
     timerShowProgressIndicatorReceivedPopulated = true;
   }
 
+  String htmlPageIsTimerAnimatedReceived = wifiWebServer.arg( HTML_PAGE_TIMER_ANIMATED_NAME );
+  bool isTimerAnimatedReceived = false;
+  bool isTimerAnimatedReceivedPopulated = false;
+  if( htmlPageIsTimerAnimatedReceived == "on" ) {
+    isTimerAnimatedReceived = true;
+    isTimerAnimatedReceivedPopulated = true;
+  } else if( htmlPageIsTimerAnimatedReceived == "" ) {
+    isTimerAnimatedReceived = false;
+    isTimerAnimatedReceivedPopulated = true;
+  }
+
+
+  String htmlPageIsSingleDigitHourShownReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME );
+  bool isSingleDigitHourShownReceived = false;
+  bool isSingleDigitHourShownReceivedPopulated = false;
+  if( htmlPageIsSingleDigitHourShownReceived == "on" ) {
+    isSingleDigitHourShownReceived = true;
+    isSingleDigitHourShownReceivedPopulated = true;
+  } else if( htmlPageIsSingleDigitHourShownReceived == "" ) {
+    isSingleDigitHourShownReceived = false;
+    isSingleDigitHourShownReceivedPopulated = true;
+  }
+
+  String htmlPageIsClockAnimatedReceived = wifiWebServer.arg( HTML_PAGE_CLOCK_ANIMATED_NAME );
+  bool isClockAnimatedReceived = false;
+  bool isClockAnimatedReceivedPopulated = false;
+  if( htmlPageIsClockAnimatedReceived == "on" ) {
+    isClockAnimatedReceived = true;
+    isClockAnimatedReceivedPopulated = true;
+  } else if( htmlPageIsClockAnimatedReceived == "" ) {
+    isClockAnimatedReceived = false;
+    isClockAnimatedReceivedPopulated = true;
+  }
+
 
   String htmlPageDisplayFontTypeNumberReceived = wifiWebServer.arg( HTML_PAGE_FONT_TYPE_NAME );
   uint displayFontTypeNumberReceived = htmlPageDisplayFontTypeNumberReceived.toInt();
   bool displayFontTypeNumberReceivedPopulated = false;
-  if( displayFontTypeNumberReceived > 0 || displayFontTypeNumberReceived <= 1 ) {
+  if( displayFontTypeNumberReceived >= 0 && displayFontTypeNumberReceived <= 1 ) {
     displayFontTypeNumberReceivedPopulated = true;
   }
 
@@ -1141,18 +1285,7 @@ void handleWebServerPost() {
     isDisplaySecondsShownReceivedPopulated = true;
   }
 
-  String htmlPageIsSingleDigitHourShownReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME );
-  bool isSingleDigitHourShownReceived = false;
-  bool isSingleDigitHourShownReceivedPopulated = false;
-  if( htmlPageIsSingleDigitHourShownReceived == "on" ) {
-    isSingleDigitHourShownReceived = true;
-    isSingleDigitHourShownReceivedPopulated = true;
-  } else if( htmlPageIsSingleDigitHourShownReceived == "" ) {
-    isSingleDigitHourShownReceived = false;
-    isSingleDigitHourShownReceivedPopulated = true;
-  }
-
-  String htmlPageIsRotateDisplayReceived = wifiWebServer.arg( HTML_PAGE_TIMER_ROTATE_DISPLAY_NAME );
+  String htmlPageIsRotateDisplayReceived = wifiWebServer.arg( HTML_PAGE_ROTATE_DISPLAY_NAME );
   bool isRotateDisplayReceived = false;
   bool isRotateDisplayReceivedPopulated = false;
   if( htmlPageIsRotateDisplayReceived == "on" ) {
@@ -1161,6 +1294,13 @@ void handleWebServerPost() {
   } else if( htmlPageIsRotateDisplayReceived == "" ) {
     isRotateDisplayReceived = false;
     isRotateDisplayReceivedPopulated = true;
+  }
+
+  String htmlPageAnimationTypeNumberReceived = wifiWebServer.arg( HTML_PAGE_ANIMATION_TYPE_NAME );
+  uint animationTypeNumberReceived = htmlPageAnimationTypeNumberReceived.toInt();
+  bool animationTypeNumberReceivedPopulated = false;
+  if( animationTypeNumberReceived >= 0 && animationTypeNumberReceived <= 2 ) {
+    animationTypeNumberReceivedPopulated = true;
   }
 
   String htmlPageIsSlowSemicolonAnimationReceived = wifiWebServer.arg( HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME );
@@ -1194,7 +1334,9 @@ void handleWebServerPost() {
   bool isWiFiChanged = strcmp( wiFiClientSsid, htmlPageSsidNameReceived.c_str() ) != 0 || strcmp( wiFiClientPassword, htmlPageSsidPasswordReceived.c_str() ) != 0;
 
   String waitTime = isWiFiChanged ? String(TIMEOUT_CONNECT_WIFI_SYNC/1000 + 6) : "2";
-  String content = getHtmlPage( getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Зберігаю...</h2>") ) );
+  addHtmlPageStart( content );
+  content += getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Зберігаю...</h2>") );
+  addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
 
@@ -1244,6 +1386,26 @@ void handleWebServerPost() {
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, timerShowProgressIndicatorReceived );
   }
 
+  if( isTimerAnimatedReceivedPopulated && isTimerAnimatedReceived != isTimerAnimated ) {
+    isTimerAnimated = isTimerAnimatedReceived;
+    Serial.println( F("Timer animated updated") );
+    writeEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimatedReceived );
+  }
+
+
+  if( isSingleDigitHourShownReceivedPopulated && isSingleDigitHourShownReceived != isSingleDigitHourShown ) {
+    isSingleDigitHourShown = isSingleDigitHourShownReceived;
+    isDisplayRerenderRequired = true;
+    Serial.println( F("Show single digit hour updated") );
+    writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShownReceived );
+  }
+
+  if( isClockAnimatedReceivedPopulated && isClockAnimatedReceived != isClockAnimated ) {
+    isClockAnimated = isClockAnimatedReceived;
+    Serial.println( F("Clock animated updated") );
+    writeEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimatedReceived );
+  }
+
 
   if( displayFontTypeNumberReceivedPopulated && displayFontTypeNumberReceived != displayFontTypeNumber ) {
     displayFontTypeNumber = displayFontTypeNumberReceived;
@@ -1266,18 +1428,17 @@ void handleWebServerPost() {
     writeEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShownReceived );
   }
 
-  if( isSingleDigitHourShownReceivedPopulated && isSingleDigitHourShownReceived != isSingleDigitHourShown ) {
-    isSingleDigitHourShown = isSingleDigitHourShownReceived;
-    isDisplayRerenderRequired = true;
-    Serial.println( F("Show single digit hour updated") );
-    writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShownReceived );
-  }
-
   if( isRotateDisplayReceivedPopulated && isRotateDisplayReceived != isRotateDisplay ) {
     isRotateDisplay = isRotateDisplayReceived;
     isDisplayRerenderRequired = true;
     Serial.println( F("Display rotation updated") );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplayReceived );
+  }
+
+  if( animationTypeNumberReceivedPopulated && animationTypeNumberReceived != animationTypeNumber ) {
+    animationTypeNumber = animationTypeNumberReceived;
+    Serial.println( F("Display animation updated") );
+    writeEepromIntValue( eepromAnimationTypeNumberIndex, animationTypeNumberReceived );
   }
 
   if( isSlowSemicolonAnimationReceivedPopulated && isSlowSemicolonAnimationReceived != isSlowSemicolonAnimation ) {
@@ -1322,7 +1483,10 @@ void handleWebServerPost() {
 }
 
 void handleWebServerGetTestNight() {
-  String content = getHtmlPage( getHtmlPageFillup( "5", "5" ) + String( F("<h2>Перевіряю нічний режим...</h2>") ) );
+  String content;
+  addHtmlPageStart( content );
+  content += getHtmlPageFillup( "5", "5" ) + String( F("<h2>Перевіряю нічний режим...</h2>") );
+  addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
     setDisplayBrightness( displayNightModeBrightness );
@@ -1333,7 +1497,10 @@ void handleWebServerGetTestNight() {
 }
 
 void handleWebServerGetTestLeds() {
-  String content = getHtmlPage( getHtmlPageFillup( "12", "12" ) + String( F("<h2>Перевіряю матрицю...</h2>") ) );
+  String content;
+  addHtmlPageStart( content );
+  content += getHtmlPageFillup( "12", "12" ) + String( F("<h2>Перевіряю матрицю...</h2>") );
+  addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
   for( uint8_t row = 0; row < 8; ++row ) {
@@ -1364,11 +1531,26 @@ void handleWebServerGetTestLeds() {
 }
 
 void handleWebServerGetReboot() {
-  String content = getHtmlPage( getHtmlPageFillup( "9", "9" ) + String( F("<h2>Перезавантажуюсь...</h2>") ) );
+  String content;
+  addHtmlPageStart( content );
+  content += getHtmlPageFillup( "9", "9" ) + String( F("<h2>Перезавантажуюсь...</h2>") );
+  addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
   delay( 200 );
   ESP.restart();
+}
+
+const uint8_t FAVICON_ICO_GZ[] PROGMEM = {
+  0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x63, 0x60, 0x60, 0x04, 0x42, 0x01, 0x01, 0x26, 0x30, 0xBD, 0x81, 0x81, 0x81, 0x41, 0x0C, 0x88, 0x35, 0x80, 0x58, 0x00, 0x88, 0x15,
+  0x80, 0x18, 0x24, 0x0E, 0x02, 0x0E, 0x0C, 0x08, 0xC0, 0x04, 0xC5, 0xD6, 0xD6, 0xD6, 0x0C, 0x15, 0x7F, 0x36, 0xC3, 0xC5, 0x0F, 0xF0, 0x43, 0xB0, 0xB1, 0x01, 0x04, 0x1B, 0xA0, 0x61, 0x98, 0x38,
+  0x4C, 0x1D, 0xB5, 0x00, 0x00, 0xE9, 0xAE, 0x62, 0x09, 0xC6, 0x00, 0x00, 0x00
+};
+
+void handleWebServerGetFavIcon() {
+  wifiWebServer.sendHeader( F("Content-Encoding"), F("gzip") );
+  wifiWebServer.send_P( 200, String( F("image/x-icon") ).c_str(), (const char*)FAVICON_ICO_GZ, sizeof(FAVICON_ICO_GZ) );
+  return;
 }
 
 void handleWebServerRedirect() {
@@ -1398,6 +1580,7 @@ void configureWebServer() {
   wifiWebServer.on( HTML_PAGE_TEST_NIGHT_ENDPOINT, HTTP_GET, handleWebServerGetTestNight );
   wifiWebServer.on( HTML_PAGE_TESTLED_ENDPOINT, HTTP_GET, handleWebServerGetTestLeds );
   wifiWebServer.on( HTML_PAGE_REBOOT_ENDPOINT, HTTP_GET, handleWebServerGetReboot );
+  wifiWebServer.on( HTML_PAGE_FAVICON_ENDPOINT, HTTP_GET, handleWebServerGetFavIcon );
   wifiWebServer.onNotFound([]() {
     handleWebServerRedirect();
   });
