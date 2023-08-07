@@ -474,7 +474,7 @@ void calculateDisplayBrightness() {
   if( sensorBrightnessAverage < 0 ) {
     sensorBrightnessAverage = currentBrightness;
   } else {
-    uint8_t sensorBrightnessSamples = 25;
+    uint8_t sensorBrightnessSamples = 50;
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
   }
 
@@ -729,8 +729,8 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
-    String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
+    String hourStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
+    String minuteStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
     String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + ( isSemicolonShown ? "\b" : "\f" ) + minuteStr ) : ( minuteStr + ( isSemicolonShown ? "\b" : "\f" ) + secondStr );
@@ -745,8 +745,8 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
-    String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
+    String hourStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
+    String minuteStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
     String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + String( ":" ) + minuteStr ) : ( minuteStr + String( ":" ) + secondStr );
@@ -759,7 +759,7 @@ void renderDisplay() {
       timerBlinkingLastUpdateMillis += TIMER_BLINKING_DELAY;
     }
 
-    String textToDisplayLarge = isTimerBlinkingShown ? String( "00:00" ) : String( "  \t  " );
+    String textToDisplayLarge = isTimerBlinkingShown ? ( isSingleDigitHourShown ? String(" 0:00") : String( "00:00" ) ) : String( "  \t  " );
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
     renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
 
@@ -1060,7 +1060,6 @@ void handleWebServerGet() {
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування годинника:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Години 0-9 без 0 (8:30 замість 08:30)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, false, isClockAnimated ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
@@ -1068,6 +1067,7 @@ void handleWebServerGet() {
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 1, false, displayFontTypeNumber ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber ) + String( F("</div>"
@@ -1816,11 +1816,42 @@ void timerButtonLongPress() {
   }
 }
 
+uint8_t getTimerDeltaTurnSeconds( bool isLeftTurn ) {
+  uint8_t timerDeltaTurnSecondsCurrent = timerDeltaTurnSeconds;
+
+  if( !isDisplaySecondsShown && timerDeltaTurnSecondsCurrent < 60 ) {
+    unsigned long timerMillis;
+    if( isTimerRunning ) {
+      timerMillis = timerCurrentStartedTimeMillis + timerCurrentSetupInMillis < millis() ? 0 : timerCurrentStartedTimeMillis + timerCurrentSetupInMillis - millis();
+    } else if( isTimerSetupRunning ) {
+      timerMillis = timerCurrentSetupInMillis;
+    } else {
+      return timerDeltaTurnSecondsCurrent;
+    }
+
+    unsigned long hour = timerMillis / (1000UL * 60UL * 60UL);
+    if( hour > 0 ) {
+      if( isLeftTurn ) {
+        unsigned long newTimerMillis = timerMillis >= ( timerDeltaTurnSecondsCurrent * 1000 ) ? timerMillis - timerDeltaTurnSecondsCurrent : 0;
+        unsigned long newHour = newTimerMillis / (1000UL * 60UL * 60UL);
+        if( newHour > 0 ) {
+          timerDeltaTurnSecondsCurrent = 60;
+        }
+      } else {
+        timerDeltaTurnSecondsCurrent = 60;
+      }
+    }
+  }
+
+  return timerDeltaTurnSecondsCurrent;
+}
+
 void timerTurnLeft() {
   if( stopBeepingOrBlinking() ) return;
 
-  if( timerCurrentSetupInMillis >= ( timerDeltaTurnSeconds * 1000 ) ) {
-    timerCurrentSetupInMillis -= ( timerDeltaTurnSeconds * 1000 );
+  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( true );
+  if( timerCurrentSetupInMillis > ( timerDeltaTurnSecondsCurrent * 1000 ) ) {
+    timerCurrentSetupInMillis -= ( timerDeltaTurnSecondsCurrent * 1000 );
   } else {
     timerCurrentSetupInMillis = 0;    
   }
@@ -1839,7 +1870,8 @@ void timerTurnLeft() {
 void timerTurnRight() {
   if( stopBeepingOrBlinking() ) return;
 
-  timerCurrentSetupInMillis += ( timerDeltaTurnSeconds * 1000 );
+  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( false );
+  timerCurrentSetupInMillis += ( timerDeltaTurnSecondsCurrent * 1000 );
   if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
     timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
   }
