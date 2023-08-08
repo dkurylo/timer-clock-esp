@@ -552,6 +552,11 @@ bool isDisplayAnimationInProgress = false;
 unsigned long displayAnimationStartedMillis;
 const unsigned long displayAnimationStepLengthMillis = 40;
 
+void cancelDisplayAnimation() {
+  textToDisplayLargeAnimated = "";
+  isDisplayAnimationInProgress = false;
+}
+
 bool isSemicolonShown = true;
 void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bool doAnimate ) {
   unsigned long currentMillis = millis();
@@ -1711,11 +1716,13 @@ void stopBlinking() {
 }
 
 void exitTimerSetupMode() {
+  cancelDisplayAnimation();
   isTimerSetupRunning = false;
   timerSetupLastUpdateMillis = 0;
 }
 
 void enterTimerSetupMode() {
+  cancelDisplayAnimation();
   isTimerSetupRunning = true;
   timerSetupLastUpdateMillis = millis();
 }
@@ -1731,6 +1738,7 @@ boolean startTimer() {
       timerCurrentSetupInMillis = ( timerDeltaPressMinutes * 60 * 1000 );
     }
   }
+  cancelDisplayAnimation();
   exitTimerSetupMode();
   timerCurrentStartedTimeMillis = millis();
   isTimerRunning = true;
@@ -1751,6 +1759,7 @@ bool cancelTimer() {
       isTimerOldFinished = true;
     }
   }
+  cancelDisplayAnimation();
   timerCurrentSetupInMillis = 0;
   isTimerRunning = false;
 
@@ -1786,6 +1795,7 @@ void timerButtonShortPress() {
   if( isTimerRunning ) {
     if( timerDeltaPressMinutes > 0 ) {
       timerCurrentSetupInMillis += ( timerDeltaPressMinutes * 60 * 1000 );
+      cancelDisplayAnimation();
     }
     if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
       timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
@@ -1857,6 +1867,7 @@ void timerTurnLeft() {
   }
 
   if( isTimerRunning ) {
+    cancelDisplayAnimation();
     if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
       if( cancelTimer() ) {
         startShortBeep();
@@ -1876,6 +1887,7 @@ void timerTurnRight() {
     timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
   }
   if( isTimerRunning ) {
+    cancelDisplayAnimation();
     return;
   }
   enterTimerSetupMode();
@@ -1883,15 +1895,12 @@ void timerTurnRight() {
 
 void timerProcessLoopTick() {
   if( isTimerBlinking && ( timerBlinkingTimeMinutes == 0 || calculateDiffMillis( timerBlinkingStartTimeMillis, millis() ) >= ( timerBlinkingTimeMinutes * 60 * 1000 ) ) ) {
+    cancelDisplayAnimation();
     stopBlinking();
-  }
-  if( isTimerOldFinished && timerOldSetupInMillis > 0 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) > ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
-    timerOldFinishedTimeMillis = 0;
-    timerOldSetupInMillis = 0;
-    isTimerOldFinished = false;
   }
   if( !isTimerRunning ) {
     if( isTimerSetupRunning && calculateDiffMillis( timerSetupLastUpdateMillis, millis() ) >= ( timerSetupResetTimeSeconds * 1000 ) ) {
+      cancelDisplayAnimation();
       isTimerSetupRunning = false;
       timerSetupLastUpdateMillis = 0;
       timerCurrentSetupInMillis = 0;
@@ -1902,6 +1911,11 @@ void timerProcessLoopTick() {
       startLongBeep();
       startBlinking();
     }
+  }
+  if( !isTimerRunning && isTimerOldFinished && timerOldSetupInMillis > 0 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) > ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
+    timerOldFinishedTimeMillis = 0;
+    timerOldSetupInMillis = 0;
+    isTimerOldFinished = false;
   }
 }
 
