@@ -125,7 +125,7 @@ uint8_t animationTypeNumber = 0;
 //brightness settings
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
 const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 300;
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 400;
 
 
 #ifdef ESP8266
@@ -952,6 +952,10 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".i{color:#CCC;margin-left:0.2em;border:1px solid #777;border-radius:50%;background-color:#666;cursor:default;font-size:65%;vertical-align:top;width:1em;height:1em;display:inline-block;text-align:center;}"
       ".i:before{content:\"i\";position:relative;top:-0.07em;}"
       ".i:hover{background-color:#777;color:#DDD;}"
+      ".stat{opacity:0.3;font-size:65%;border:1px solid #DDD;border-radius:4px;overflow:hidden;}"
+      ".stat>span{padding:1px 4px;display:inline-block;}"
+      ".stat>span:first-of-type{background-color:#666;}"
+      ".stat>span:not(:last-of-type){border-right:1px solid #DDD;}"
       "@media(max-device-width:800px) and (orientation:portrait){:root{--f:4vw;}.wrp{width:94%;max-width:100%;}}"
     "</style>"
   "</head>"
@@ -1094,6 +1098,11 @@ void handleWebServerGet() {
     "<span>"
       "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_UPDATE_ENDPOINT, F("Оновити прошивку") ) + String( F("<span class=\"i\" title=\"Поточна версія: ") ) + String( getFirmwareVersion() ) + String( F("\"></span></span>"
       "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Перезавантажити") ) + String( F("</span>"
+    "</span>"
+  "</div>"
+  "<div class=\"fx\" style=\"padding-top:0.7em;\">"
+    "<span>"
+      "<div class=\"stat\"><span>Яскравість</span><span>CUR ") ) + String( analogRead(A0) ) + String( F("</span><span>AVG ") ) + String( sensorBrightnessAverage ) + String( F("</span><span>REQ ") ) + String( displayCurrentBrightness ) + String( F("</span><span>DSP ") ) + String( static_cast<uint8_t>( round( displayPreviousBrightness ) ) ) + String( F("</span></div>"
     "</span>"
   "</div>"
 "</div>") );
