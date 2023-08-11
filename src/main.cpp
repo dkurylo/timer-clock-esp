@@ -472,10 +472,10 @@ double sensorBrightnessAverage = -1.0;
 void calculateDisplayBrightness() {
   uint16_t currentBrightness = analogRead(A0);
   if( sensorBrightnessAverage < 0 ) {
-    sensorBrightnessAverage = currentBrightness;
+    sensorBrightnessAverage = (double)currentBrightness;
   } else {
     uint8_t sensorBrightnessSamples = 50;
-    sensorBrightnessAverage = ( sensorBrightnessAverage * ( sensorBrightnessSamples - 1 ) + currentBrightness ) / sensorBrightnessSamples;
+    sensorBrightnessAverage = ( sensorBrightnessAverage * ( static_cast<double>(sensorBrightnessSamples) - static_cast<double>(1.0) ) + currentBrightness ) / static_cast<double>(sensorBrightnessSamples);
   }
 
   if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
@@ -944,7 +944,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       "output{padding-left:0.6em;}"
       "button{width:100%;padding:0.2em;}"
       "a{color:#AAA;}"
-      ".sub+.sub{padding-left:0.6em;}"
+      ".sub:not(:last-of-type){padding-right:0.6em;}"
       ".ft{margin-top:1em;}"
       ".pl{padding-left:0.6em;}"
       ".pll{padding-left:calc(var(--f)*1.2 + 0.6em);}"
