@@ -1736,7 +1736,7 @@ void enterTimerSetupMode() {
   timerSetupLastUpdateMillis = millis();
 }
 
-boolean startTimer() {
+bool startTimer() {
   if( isTimerRunning ) return false;
   if( timerCurrentSetupInMillis == 0 ) {
     if( isTimerOldFinished && timerOldSetupInMillis >= timerDeltaTurnSeconds * 1000 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) <= ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
@@ -1943,7 +1943,7 @@ void encoderProcessLoopTick() {
 
 
 WiFiEventHandler wiFiEventHandler;
-void onWiFiConnected( const WiFiEventStationModeConnected&event ) {
+void onWiFiConnected( const WiFiEventStationModeConnected& event ) {
   Serial.println( String( F("WiFi is connected to '") + String( event.ssid ) ) + String ( F("'") ) );
   forceNtpUpdate = true;
 }
