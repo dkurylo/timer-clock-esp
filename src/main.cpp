@@ -123,7 +123,7 @@ bool isClockAnimated = false;
 uint8_t animationTypeNumber = 0;
 
 //brightness settings
-const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
+const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
 const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
 const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 400;
 
@@ -794,6 +794,346 @@ void renderDisplay() {
 }
 
 
+//beeper functions
+bool beeperPinStatus = false;
+void startBeeping() {
+  if( beeperPinStatus ) return;
+  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 0 : 1 );
+  beeperPinStatus = true;
+}
+
+void stopBeeping( bool isInit ) {
+  if( !isInit && !beeperPinStatus ) return;
+  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 1 : 0 );
+  beeperPinStatus = false;
+}
+
+void stopBeeping() {
+  stopBeeping( false );
+}
+
+void initBeeper() {
+  pinMode( BEEPER_PIN, OUTPUT );
+  stopBeeping( true );
+}
+
+void startLongBeep() {
+  if( timerLongBeepingTimeSeconds == 0 ) return;
+  isTimerLongBeeping = true;
+  timerLongBeepingStartTimeMillis = millis();
+  startBeeping();
+}
+
+void stopLongBeep() {
+  isTimerLongBeeping = false;
+  timerLongBeepingStartTimeMillis = 0;
+  if( !isTimerLongBeeping && !isTimerShortBeeping ) {
+    stopBeeping();
+  }
+}
+
+void startShortBeep() {
+  isTimerShortBeeping = true;
+  timerShortBeepingStartTimeMillis = millis();
+  startBeeping();
+}
+
+void stopShortBeep() {
+  isTimerShortBeeping = false;
+  timerShortBeepingStartTimeMillis = 0;
+  if( !isTimerLongBeeping && !isTimerShortBeeping ) {
+    stopBeeping();
+  }
+}
+
+void beeperProcessLoopTick() {
+  if( isTimerShortBeeping && ( timerShortBeepingTimeMillis == 0 || calculateDiffMillis( timerShortBeepingStartTimeMillis, millis() ) >= ( timerShortBeepingTimeMillis ) ) ) {
+    stopShortBeep();
+  }
+  if( isTimerLongBeeping ) {
+    unsigned long timerIsBeepingForTime = calculateDiffMillis( timerLongBeepingStartTimeMillis, millis() );
+    if( timerLongBeepingTimeSeconds == 0 || timerIsBeepingForTime >= ( timerLongBeepingTimeSeconds * 1000 ) ) {
+      stopLongBeep();
+    } else {
+      uint8_t timerFirstStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 8;
+      uint8_t timerSecondStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 4;
+      uint8_t timerThirdStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 2;
+      if( timerIsBeepingForTime < timerFirstStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 1000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else if( timerIsBeepingForTime < timerSecondStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 2000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else if( timerIsBeepingForTime < timerThirdStageLongBeepingTimeSeconds * 1000 ) {
+        if( timerIsBeepingForTime % 4000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      } else {
+        if( timerIsBeepingForTime % 8000 < 500 ) {
+          startBeeping();
+        } else {
+          stopBeeping();
+        }
+      }
+    }
+  }
+}
+
+
+//timer functions
+unsigned long timeClientSecondsAtDisplaySyncStart = 0;
+void forceDisplaySync() {
+  if( timeClient.isTimeSet() ) {
+    timeClientSecondsAtDisplaySyncStart = timeClient.getEpochTime();
+  }
+  isForceDisplaySync = true;
+  isForceDisplaySyncDisplayRenderOverride = true;
+}
+
+void startBlinking() {
+  if( timerBlinkingTimeMinutes == 0 ) return;
+  unsigned long currentMillis = millis();
+  isTimerBlinking = true;
+  timerBlinkingStartTimeMillis = currentMillis;
+  isTimerBlinkingShown = false;
+  timerBlinkingLastUpdateMillis = currentMillis;
+}
+
+void stopBlinking() {
+  isTimerBlinking = false;
+  timerBlinkingStartTimeMillis = 0;
+  isTimerBlinkingShown = false;
+  timerBlinkingLastUpdateMillis = 0;
+
+  forceDisplaySync();
+}
+
+void exitTimerSetupMode() {
+  cancelDisplayAnimation();
+  isTimerSetupRunning = false;
+  timerSetupLastUpdateMillis = 0;
+}
+
+void enterTimerSetupMode() {
+  cancelDisplayAnimation();
+  isTimerSetupRunning = true;
+  timerSetupLastUpdateMillis = millis();
+}
+
+bool startTimer() {
+  if( isTimerRunning ) return false;
+  if( timerCurrentSetupInMillis == 0 ) {
+    if( isTimerOldFinished && timerOldSetupInMillis >= timerDeltaTurnSeconds * 1000 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) <= ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
+      uint16_t wholeSecondRemainder = timerOldSetupInMillis % 1000;
+      timerCurrentSetupInMillis = timerOldSetupInMillis - wholeSecondRemainder + ( wholeSecondRemainder < 500 ? 0 : 1000 );
+    } else {
+      if( timerDeltaPressMinutes == 0 ) return false;
+      timerCurrentSetupInMillis = ( timerDeltaPressMinutes * 60 * 1000 );
+    }
+  }
+  cancelDisplayAnimation();
+  exitTimerSetupMode();
+  timerCurrentStartedTimeMillis = millis();
+  isTimerRunning = true;
+
+  forceDisplaySync();
+  return true;
+}
+
+bool cancelTimer() {
+  if( !isTimerRunning ) return false;
+  if( timerRememberLastInputTimeMinutes > 0 ) {
+    timerOldSetupInMillis = calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ); //when calcelling timer, the amount of time passed from its start will be temporarily stored in order to restart the times with that time
+    if( timerOldSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
+      timerOldSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
+    }
+    if( timerOldSetupInMillis > 0 ) {
+      timerOldFinishedTimeMillis = millis();
+      isTimerOldFinished = true;
+    }
+  }
+  cancelDisplayAnimation();
+  timerCurrentSetupInMillis = 0;
+  isTimerRunning = false;
+
+  forceDisplaySync();
+  return true;
+}
+
+bool stopBeepingOrBlinking() {
+  if( isTimerLongBeeping || isTimerBlinking ) {
+    bool wasTimerLongBeepingOrBlinking = false;
+    if( isTimerLongBeeping ) {
+      stopLongBeep();
+      wasTimerLongBeepingOrBlinking = true;
+    }
+    if( isTimerBlinking ) {
+      stopBlinking();
+      startShortBeep();
+      wasTimerLongBeepingOrBlinking = true;
+    }
+    if( wasTimerLongBeepingOrBlinking ) {
+      exitTimerSetupMode();
+      timerCurrentSetupInMillis = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+
+void timerButtonShortPress() {
+  if( stopBeepingOrBlinking() ) return;
+
+  if( isTimerRunning ) {
+    if( timerDeltaPressMinutes > 0 ) {
+      timerCurrentSetupInMillis += ( timerDeltaPressMinutes * 60 * 1000 );
+      cancelDisplayAnimation();
+    }
+    if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
+      timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
+    }
+    return;
+  }
+  if( startTimer() ) {
+    startShortBeep();
+  }
+}
+
+void timerButtonLongPress() {
+  if( stopBeepingOrBlinking() ) return;
+
+  if( isTimerSetupRunning ) {
+    exitTimerSetupMode();
+    timerCurrentSetupInMillis = 0;
+    return;
+  }
+  if( isTimerRunning ) {
+    if( cancelTimer() ) {
+      startShortBeep();
+    }
+    return;
+  }
+  if( startTimer() ) {
+    startShortBeep();
+  }
+}
+
+uint8_t getTimerDeltaTurnSeconds( bool isLeftTurn ) {
+  uint8_t timerDeltaTurnSecondsCurrent = timerDeltaTurnSeconds;
+
+  if( !isDisplaySecondsShown && timerDeltaTurnSecondsCurrent < 60 ) {
+    unsigned long timerMillis;
+    if( isTimerRunning ) {
+      timerMillis = timerCurrentStartedTimeMillis + timerCurrentSetupInMillis < millis() ? 0 : timerCurrentStartedTimeMillis + timerCurrentSetupInMillis - millis();
+    } else if( isTimerSetupRunning ) {
+      timerMillis = timerCurrentSetupInMillis;
+    } else {
+      return timerDeltaTurnSecondsCurrent;
+    }
+
+    unsigned long hour = timerMillis / (1000UL * 60UL * 60UL);
+    if( hour > 0 ) {
+      if( isLeftTurn ) {
+        unsigned long newTimerMillis = timerMillis >= ( timerDeltaTurnSecondsCurrent * 1000 ) ? timerMillis - timerDeltaTurnSecondsCurrent : 0;
+        unsigned long newHour = newTimerMillis / (1000UL * 60UL * 60UL);
+        if( newHour > 0 ) {
+          timerDeltaTurnSecondsCurrent = 60;
+        }
+      } else {
+        timerDeltaTurnSecondsCurrent = 60;
+      }
+    }
+  }
+
+  return timerDeltaTurnSecondsCurrent;
+}
+
+void timerTurnLeft() {
+  if( stopBeepingOrBlinking() ) return;
+
+  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( true );
+  if( timerCurrentSetupInMillis > ( timerDeltaTurnSecondsCurrent * 1000 ) ) {
+    timerCurrentSetupInMillis -= ( timerDeltaTurnSecondsCurrent * 1000 );
+  } else {
+    timerCurrentSetupInMillis = 0;    
+  }
+
+  if( isTimerRunning ) {
+    cancelDisplayAnimation();
+    if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
+      if( cancelTimer() ) {
+        startShortBeep();
+      }
+    }
+    return;
+  }
+  enterTimerSetupMode();
+}
+
+void timerTurnRight() {
+  if( stopBeepingOrBlinking() ) return;
+
+  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( false );
+  timerCurrentSetupInMillis += ( timerDeltaTurnSecondsCurrent * 1000 );
+  if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
+    timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
+  }
+  if( isTimerRunning ) {
+    cancelDisplayAnimation();
+    return;
+  }
+  enterTimerSetupMode();
+}
+
+void timerProcessLoopTick() {
+  if( isTimerBlinking && ( timerBlinkingTimeMinutes == 0 || calculateDiffMillis( timerBlinkingStartTimeMillis, millis() ) >= ( timerBlinkingTimeMinutes * 60 * 1000 ) ) ) {
+    cancelDisplayAnimation();
+    stopBlinking();
+  }
+  if( !isTimerRunning ) {
+    if( isTimerSetupRunning && calculateDiffMillis( timerSetupLastUpdateMillis, millis() ) >= ( timerSetupResetTimeSeconds * 1000 ) ) {
+      cancelDisplayAnimation();
+      isTimerSetupRunning = false;
+      timerSetupLastUpdateMillis = 0;
+      timerCurrentSetupInMillis = 0;
+    }
+  } else {
+    if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
+      cancelTimer();
+      startLongBeep();
+      startBlinking();
+    }
+  }
+  if( !isTimerRunning && isTimerOldFinished && timerOldSetupInMillis > 0 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) > ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
+    timerOldFinishedTimeMillis = 0;
+    timerOldSetupInMillis = 0;
+    isTimerOldFinished = false;
+  }
+}
+
+void encoderProcessLoopTick() {
+  enc.tick();
+  if( enc.left() || enc.leftH() ) {
+    timerTurnLeft();
+  } else if( enc.right() || enc.rightH() ) {
+    timerTurnRight();
+  } else if( enc.click() ) {
+    timerButtonShortPress();
+  } else if( enc.held() ) {
+    timerButtonLongPress();
+  }
+}
+
+
 //data update helpers
 void forceRefreshData() {
   initVariables();
@@ -923,8 +1263,9 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       "body{margin:0;background-color:#444;font-family:sans-serif;color:#FFF;}"
       "body,input,button{font-size:var(--f);}"
       ".wrp{width:60%;min-width:460px;max-width:600px;margin:auto;margin-bottom:10px;}"
-      "h2{color:#FFF;font-size:calc(var(--f)*1.2);text-align:center;margin-top:0.3em;margin-bottom:0.3em;}"
-      ".fx{display:flex;flex-wrap:wrap;margin:auto;margin-top:0.3em;}"
+      "h2{color:#FFF;font-size:calc(var(--f)*1.2);text-align:center;margin-top:0.3em;margin-bottom:0.2em;}"
+      ".fx{display:flex;flex-wrap:wrap;margin:auto;}"
+      ".fx:not(:first-of-type){margin-top:0.3em;}"
       ".fx .fi{display:flex;align-items:center;margin-top:0.3em;width:100%;}"
       ".fx .fi:first-of-type,.fx.fv .fi{margin-top:0;}"
       ".fv{flex-direction:column;align-items:flex-start;}"
@@ -944,7 +1285,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       "output{padding-left:0.6em;}"
       "button{width:100%;padding:0.2em;}"
       "a{color:#AAA;}"
-      ".sub{word-wrap:nowrap;}"
+      ".sub{text-wrap:nowrap;}"
       ".sub:not(:last-of-type){padding-right:0.6em;}"
       ".ft{margin-top:1em;}"
       ".pl{padding-left:0.6em;}"
@@ -957,7 +1298,10 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".stat>span{padding:1px 4px;display:inline-block;}"
       ".stat>span:first-of-type{background-color:#666;}"
       ".stat>span:not(:last-of-type){border-right:1px solid #DDD;}"
-      "@media(max-device-width:800px) and (orientation:portrait){:root{--f:4vw;}.wrp{width:94%;max-width:100%;}}"
+      "@media(max-device-width:800px) and (orientation:portrait){"
+        ":root{--f:4vw;}"
+        ".wrp{width:94%;max-width:100%;}"
+      "}"
     "</style>"
   "</head>"
   "<body>"
@@ -1017,6 +1361,7 @@ const uint8_t getWiFiClientSsidNameMaxLength() { return WIFI_SSID_MAX_LENGTH - 1
 const uint8_t getWiFiClientSsidPasswordMaxLength() { return WIFI_PASSWORD_MAX_LENGTH - 1;}
 
 const char* HTML_PAGE_ROOT_ENDPOINT = "/";
+const char* HTML_PAGE_TIMER_ENDPOINT = "/timer";
 const char* HTML_PAGE_REBOOT_ENDPOINT = "/reboot";
 const char* HTML_PAGE_TESTLED_ENDPOINT = "/testled";
 const char* HTML_PAGE_TEST_NIGHT_ENDPOINT = "/testdim";
@@ -1101,7 +1446,7 @@ void handleWebServerGet() {
       "<span class=\"sub\">") ) + getHtmlLink( HTML_PAGE_REBOOT_ENDPOINT, F("Перезавантажити") ) + String( F("</span>"
     "</span>"
   "</div>"
-  "<div class=\"fx\" style=\"padding-top:0.7em;\">"
+  "<div class=\"fx\" style=\"padding-top:0.3em;\">"
     "<span>"
       "<div class=\"stat\"><span>Яскравість</span><span>CUR ") ) + String( analogRead(A0) ) + String( F("</span><span>AVG ") ) + String( sensorBrightnessAverage ) + String( F("</span><span>REQ ") ) + String( displayCurrentBrightness ) + String( F("</span><span>DSP ") ) + String( static_cast<uint8_t>( round( displayPreviousBrightness ) ) ) + String( F("</span></div>"
     "</span>"
@@ -1497,6 +1842,55 @@ void handleWebServerPost() {
   }
 }
 
+bool containsOnlyDigits( const String &str ) {
+  size_t length = str.length();
+  for( size_t i = 0; i < length; ++i ) {
+    if( isdigit( str.charAt(i) ) ) continue;
+    return false;
+  }
+  return true;
+}
+
+void handleWebServerGetTimer() {
+  String seconds = wifiWebServer.arg("s");
+  String minutes = wifiWebServer.arg("m");
+  String hours = wifiWebServer.arg("h");
+  unsigned long millisToUse = 0;
+
+  handleWebServerGet();
+
+  if( !seconds.isEmpty() && seconds.length() <= 5 && containsOnlyDigits( seconds ) ) {
+    millisToUse += seconds.toInt();
+  }
+  if( !minutes.isEmpty() && minutes.length() <= 4 && containsOnlyDigits( minutes ) ) {
+    millisToUse += minutes.toInt() * 60;
+  }
+  if( !hours.isEmpty() && hours.length() <= 2 && containsOnlyDigits( hours ) ) {
+    millisToUse += hours.toInt() * 60 * 60;
+  }
+  millisToUse = millisToUse * 1000;
+  if( millisToUse >= TIMER_MAX_TIME_TO_SET_UP ) {
+    return;
+  }
+
+  stopBeepingOrBlinking();
+  exitTimerSetupMode();
+
+  if( !isTimerRunning && millisToUse == 0 ) return;
+
+  timerCurrentSetupInMillis = millisToUse;
+
+  if( isTimerRunning ) {
+    if( timerCurrentSetupInMillis == 0 && cancelTimer() ) {
+      startShortBeep();
+    }
+  } else {
+    if( startTimer() ) {
+      startShortBeep();
+    }
+  }
+}
+
 void handleWebServerGetTestNight() {
   String content;
   addHtmlPageStart( content );
@@ -1514,7 +1908,7 @@ void handleWebServerGetTestNight() {
 void handleWebServerGetTestLeds() {
   String content;
   addHtmlPageStart( content );
-  content += getHtmlPageFillup( "12", "12" ) + String( F("<h2>Перевіряю матрицю...</h2>") );
+  content += getHtmlPageFillup( "20", "20" ) + String( F("<h2>Перевіряю матрицю...</h2>") );
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, F("text/html"), content );
@@ -1536,13 +1930,31 @@ void handleWebServerGetTestLeds() {
     display.update();
     delay( 200 );
   }
+  for( uint8_t row = 2; row <= 8; row+=2 ) {
+    for( uint8_t y = 0; y < 8; ++y ) {
+      for( uint8_t x = 0; x < 32; ++x ) {
+        display.setPoint( y, 32 - 1 - x, ( x % row == y % row || x % row == row - y % row ) );
+      }
+    }
+    display.update();
+    delay( 1500 );
+  }
+  for( uint8_t row = 0; row < 4; ++row ) {
+    for( uint8_t y = 0; y < 8; ++y ) {
+      for( uint8_t x = 0; x < 32; ++x ) {
+        display.setPoint( y, 32 - 1 - x, ( ( x % 4 == row ) || ( y % 4 == row ) ) );
+      }
+    }
+    display.update();
+    delay( 1500 );
+  }
   for( uint8_t y = 0; y < 8; ++y ) {
     for( uint8_t x = 0; x < 32; ++x ) {
       display.setPoint( y, 32 - 1 - x, true );
     }
   }
   display.update();
-  delay( 2000 );
+  delay( 1800 );
 }
 
 void handleWebServerGetReboot() {
@@ -1592,6 +2004,7 @@ void startWebServer() {
 void configureWebServer() {
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_GET,  handleWebServerGet );
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_POST, handleWebServerPost );
+  wifiWebServer.on( HTML_PAGE_TIMER_ENDPOINT, HTTP_GET,  handleWebServerGetTimer );
   wifiWebServer.on( HTML_PAGE_TEST_NIGHT_ENDPOINT, HTTP_GET, handleWebServerGetTestNight );
   wifiWebServer.on( HTML_PAGE_TESTLED_ENDPOINT, HTTP_GET, handleWebServerGetTestLeds );
   wifiWebServer.on( HTML_PAGE_REBOOT_ENDPOINT, HTTP_GET, handleWebServerGetReboot );
@@ -1602,345 +2015,6 @@ void configureWebServer() {
   httpUpdater.setup( &wifiWebServer );
 }
 
-
-//beeper functions
-bool beeperPinStatus = false;
-void startBeeping() {
-  if( beeperPinStatus ) return;
-  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 0 : 1 );
-  beeperPinStatus = true;
-}
-
-void stopBeeping( bool isInit ) {
-  if( !isInit && !beeperPinStatus ) return;
-  digitalWrite( BEEPER_PIN, IS_LOW_LEVEL_BUZZER ? 1 : 0 );
-  beeperPinStatus = false;
-}
-
-void stopBeeping() {
-  stopBeeping( false );
-}
-
-void initBeeper() {
-  pinMode( BEEPER_PIN, OUTPUT );
-  stopBeeping( true );
-}
-
-void startLongBeep() {
-  if( timerLongBeepingTimeSeconds == 0 ) return;
-  isTimerLongBeeping = true;
-  timerLongBeepingStartTimeMillis = millis();
-  startBeeping();
-}
-
-void stopLongBeep() {
-  isTimerLongBeeping = false;
-  timerLongBeepingStartTimeMillis = 0;
-  if( !isTimerLongBeeping && !isTimerShortBeeping ) {
-    stopBeeping();
-  }
-}
-
-void startShortBeep() {
-  isTimerShortBeeping = true;
-  timerShortBeepingStartTimeMillis = millis();
-  startBeeping();
-}
-
-void stopShortBeep() {
-  isTimerShortBeeping = false;
-  timerShortBeepingStartTimeMillis = 0;
-  if( !isTimerLongBeeping && !isTimerShortBeeping ) {
-    stopBeeping();
-  }
-}
-
-void beeperProcessLoopTick() {
-  if( isTimerShortBeeping && ( timerShortBeepingTimeMillis == 0 || calculateDiffMillis( timerShortBeepingStartTimeMillis, millis() ) >= ( timerShortBeepingTimeMillis ) ) ) {
-    stopShortBeep();
-  }
-  if( isTimerLongBeeping ) {
-    unsigned long timerIsBeepingForTime = calculateDiffMillis( timerLongBeepingStartTimeMillis, millis() );
-    if( timerLongBeepingTimeSeconds == 0 || timerIsBeepingForTime >= ( timerLongBeepingTimeSeconds * 1000 ) ) {
-      stopLongBeep();
-    } else {
-      uint8_t timerFirstStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 8;
-      uint8_t timerSecondStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 4;
-      uint8_t timerThirdStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 2;
-      if( timerIsBeepingForTime < timerFirstStageLongBeepingTimeSeconds * 1000 ) {
-        if( timerIsBeepingForTime % 1000 < 500 ) {
-          startBeeping();
-        } else {
-          stopBeeping();
-        }
-      } else if( timerIsBeepingForTime < timerSecondStageLongBeepingTimeSeconds * 1000 ) {
-        if( timerIsBeepingForTime % 2000 < 500 ) {
-          startBeeping();
-        } else {
-          stopBeeping();
-        }
-      } else if( timerIsBeepingForTime < timerThirdStageLongBeepingTimeSeconds * 1000 ) {
-        if( timerIsBeepingForTime % 4000 < 500 ) {
-          startBeeping();
-        } else {
-          stopBeeping();
-        }
-      } else {
-        if( timerIsBeepingForTime % 8000 < 500 ) {
-          startBeeping();
-        } else {
-          stopBeeping();
-        }
-      }
-    }
-  }
-}
-
-
-//timer functions
-unsigned long timeClientSecondsAtDisplaySyncStart = 0;
-void forceDisplaySync() {
-  if( timeClient.isTimeSet() ) {
-    timeClientSecondsAtDisplaySyncStart = timeClient.getEpochTime();
-  }
-  isForceDisplaySync = true;
-  isForceDisplaySyncDisplayRenderOverride = true;
-}
-
-void startBlinking() {
-  if( timerBlinkingTimeMinutes == 0 ) return;
-  unsigned long currentMillis = millis();
-  isTimerBlinking = true;
-  timerBlinkingStartTimeMillis = currentMillis;
-  isTimerBlinkingShown = false;
-  timerBlinkingLastUpdateMillis = currentMillis;
-}
-
-void stopBlinking() {
-  isTimerBlinking = false;
-  timerBlinkingStartTimeMillis = 0;
-  isTimerBlinkingShown = false;
-  timerBlinkingLastUpdateMillis = 0;
-
-  forceDisplaySync();
-}
-
-void exitTimerSetupMode() {
-  cancelDisplayAnimation();
-  isTimerSetupRunning = false;
-  timerSetupLastUpdateMillis = 0;
-}
-
-void enterTimerSetupMode() {
-  cancelDisplayAnimation();
-  isTimerSetupRunning = true;
-  timerSetupLastUpdateMillis = millis();
-}
-
-bool startTimer() {
-  if( isTimerRunning ) return false;
-  if( timerCurrentSetupInMillis == 0 ) {
-    if( isTimerOldFinished && timerOldSetupInMillis >= timerDeltaTurnSeconds * 1000 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) <= ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
-      uint16_t wholeSecondRemainder = timerOldSetupInMillis % 1000;
-      timerCurrentSetupInMillis = timerOldSetupInMillis - wholeSecondRemainder + ( wholeSecondRemainder < 500 ? 0 : 1000 );
-    } else {
-      if( timerDeltaPressMinutes == 0 ) return false;
-      timerCurrentSetupInMillis = ( timerDeltaPressMinutes * 60 * 1000 );
-    }
-  }
-  cancelDisplayAnimation();
-  exitTimerSetupMode();
-  timerCurrentStartedTimeMillis = millis();
-  isTimerRunning = true;
-
-  forceDisplaySync();
-  return true;
-}
-
-bool cancelTimer() {
-  if( !isTimerRunning ) return false;
-  if( timerRememberLastInputTimeMinutes > 0 ) {
-    timerOldSetupInMillis = calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ); //when calcelling timer, the amount of time passed from its start will be temporarily stored in order to restart the times with that time
-    if( timerOldSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
-      timerOldSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
-    }
-    if( timerOldSetupInMillis > 0 ) {
-      timerOldFinishedTimeMillis = millis();
-      isTimerOldFinished = true;
-    }
-  }
-  cancelDisplayAnimation();
-  timerCurrentSetupInMillis = 0;
-  isTimerRunning = false;
-
-  forceDisplaySync();
-  return true;
-}
-
-bool stopBeepingOrBlinking() {
-  if( isTimerLongBeeping || isTimerBlinking ) {
-    bool wasTimerLongBeepingOrBlinking = false;
-    if( isTimerLongBeeping ) {
-      stopLongBeep();
-      wasTimerLongBeepingOrBlinking = true;
-    }
-    if( isTimerBlinking ) {
-      stopBlinking();
-      startShortBeep();
-      wasTimerLongBeepingOrBlinking = true;
-    }
-    if( wasTimerLongBeepingOrBlinking ) {
-      exitTimerSetupMode();
-      timerCurrentSetupInMillis = 0;
-      return true;
-    }
-  }
-  return false;
-}
-
-
-void timerButtonShortPress() {
-  if( stopBeepingOrBlinking() ) return;
-
-  if( isTimerRunning ) {
-    if( timerDeltaPressMinutes > 0 ) {
-      timerCurrentSetupInMillis += ( timerDeltaPressMinutes * 60 * 1000 );
-      cancelDisplayAnimation();
-    }
-    if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
-      timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
-    }
-    return;
-  }
-  if( startTimer() ) {
-    startShortBeep();
-  }
-}
-
-void timerButtonLongPress() {
-  if( stopBeepingOrBlinking() ) return;
-
-  if( isTimerSetupRunning ) {
-    exitTimerSetupMode();
-    timerCurrentSetupInMillis = 0;
-    return;
-  }
-  if( isTimerRunning ) {
-    if( cancelTimer() ) {
-      startShortBeep();
-    }
-    return;
-  }
-  if( startTimer() ) {
-    startShortBeep();
-  }
-}
-
-uint8_t getTimerDeltaTurnSeconds( bool isLeftTurn ) {
-  uint8_t timerDeltaTurnSecondsCurrent = timerDeltaTurnSeconds;
-
-  if( !isDisplaySecondsShown && timerDeltaTurnSecondsCurrent < 60 ) {
-    unsigned long timerMillis;
-    if( isTimerRunning ) {
-      timerMillis = timerCurrentStartedTimeMillis + timerCurrentSetupInMillis < millis() ? 0 : timerCurrentStartedTimeMillis + timerCurrentSetupInMillis - millis();
-    } else if( isTimerSetupRunning ) {
-      timerMillis = timerCurrentSetupInMillis;
-    } else {
-      return timerDeltaTurnSecondsCurrent;
-    }
-
-    unsigned long hour = timerMillis / (1000UL * 60UL * 60UL);
-    if( hour > 0 ) {
-      if( isLeftTurn ) {
-        unsigned long newTimerMillis = timerMillis >= ( timerDeltaTurnSecondsCurrent * 1000 ) ? timerMillis - timerDeltaTurnSecondsCurrent : 0;
-        unsigned long newHour = newTimerMillis / (1000UL * 60UL * 60UL);
-        if( newHour > 0 ) {
-          timerDeltaTurnSecondsCurrent = 60;
-        }
-      } else {
-        timerDeltaTurnSecondsCurrent = 60;
-      }
-    }
-  }
-
-  return timerDeltaTurnSecondsCurrent;
-}
-
-void timerTurnLeft() {
-  if( stopBeepingOrBlinking() ) return;
-
-  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( true );
-  if( timerCurrentSetupInMillis > ( timerDeltaTurnSecondsCurrent * 1000 ) ) {
-    timerCurrentSetupInMillis -= ( timerDeltaTurnSecondsCurrent * 1000 );
-  } else {
-    timerCurrentSetupInMillis = 0;    
-  }
-
-  if( isTimerRunning ) {
-    cancelDisplayAnimation();
-    if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
-      if( cancelTimer() ) {
-        startShortBeep();
-      }
-    }
-    return;
-  }
-  enterTimerSetupMode();
-}
-
-void timerTurnRight() {
-  if( stopBeepingOrBlinking() ) return;
-
-  uint8_t timerDeltaTurnSecondsCurrent = getTimerDeltaTurnSeconds( false );
-  timerCurrentSetupInMillis += ( timerDeltaTurnSecondsCurrent * 1000 );
-  if( timerCurrentSetupInMillis > TIMER_MAX_TIME_TO_SET_UP ) {
-    timerCurrentSetupInMillis = TIMER_MAX_TIME_TO_SET_UP;
-  }
-  if( isTimerRunning ) {
-    cancelDisplayAnimation();
-    return;
-  }
-  enterTimerSetupMode();
-}
-
-void timerProcessLoopTick() {
-  if( isTimerBlinking && ( timerBlinkingTimeMinutes == 0 || calculateDiffMillis( timerBlinkingStartTimeMillis, millis() ) >= ( timerBlinkingTimeMinutes * 60 * 1000 ) ) ) {
-    cancelDisplayAnimation();
-    stopBlinking();
-  }
-  if( !isTimerRunning ) {
-    if( isTimerSetupRunning && calculateDiffMillis( timerSetupLastUpdateMillis, millis() ) >= ( timerSetupResetTimeSeconds * 1000 ) ) {
-      cancelDisplayAnimation();
-      isTimerSetupRunning = false;
-      timerSetupLastUpdateMillis = 0;
-      timerCurrentSetupInMillis = 0;
-    }
-  } else {
-    if( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) >= timerCurrentSetupInMillis ) {
-      cancelTimer();
-      startLongBeep();
-      startBlinking();
-    }
-  }
-  if( !isTimerRunning && isTimerOldFinished && timerOldSetupInMillis > 0 && timerRememberLastInputTimeMinutes > 0 && calculateDiffMillis( timerOldFinishedTimeMillis, millis() ) > ( timerRememberLastInputTimeMinutes * 60 * 1000 ) ) {
-    timerOldFinishedTimeMillis = 0;
-    timerOldSetupInMillis = 0;
-    isTimerOldFinished = false;
-  }
-}
-
-void encoderProcessLoopTick() {
-  enc.tick();
-  if( enc.left() || enc.leftH() ) {
-    timerTurnLeft();
-  } else if( enc.right() || enc.rightH() ) {
-    timerTurnRight();
-  } else if( enc.click() ) {
-    timerButtonShortPress();
-  } else if( enc.held() ) {
-    timerButtonLongPress();
-  }
-}
 
 
 WiFiEventHandler wiFiEventHandler;
@@ -1977,15 +2051,14 @@ void loop() {
     setInternalLedStatus( getInternalLedStatus() == HIGH ? LOW : HIGH );
   }
 
-  encoderProcessLoopTick();
-  timerProcessLoopTick();
-  beeperProcessLoopTick();
-
   if( isApInitialized ) {
     dnsServer.processNextRequest();
   }
   wifiWebServer.handleClient();
 
+  encoderProcessLoopTick();
+  timerProcessLoopTick();
+  beeperProcessLoopTick();
   brightnessProcessLoopTick();
 
   currentMillis = millis();
