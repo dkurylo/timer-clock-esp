@@ -179,6 +179,47 @@ unsigned long calculateDiffMillis( unsigned long startMillis, unsigned long endM
   }
 }
 
+String getContentType( String fileExtension ) {
+  String contentType = "";
+  if( fileExtension == F("htm") || fileExtension == F("html") ) {
+    contentType = F("text/html");
+  } else if( fileExtension == F("gif") ) {
+    contentType = F("image/gif");
+  } else if( fileExtension == F("png") ) {
+    contentType = F("image/png");
+  } else if( fileExtension == F("webp") ) {
+    contentType = F("image/webp");
+  } else if( fileExtension == F("bmp") ) {
+    contentType = F("image/bmp");
+  } else if( fileExtension == F("ico") ) {
+    contentType = F("image/x-icon");
+  } else if( fileExtension == F("svg") ) {
+    contentType = F("image/svg+xml");
+  } else if( fileExtension == F("js") ) {
+    contentType = F("text/javascript");
+  } else if( fileExtension == F("css") ) {
+    contentType = F("text/css");
+  } else if( fileExtension == F("json") ) {
+    contentType = F("application/json");
+  } else if( fileExtension == F("xml") ) {
+    contentType = F("application/xml");
+  } else if( fileExtension == F("txt") ) {
+    contentType = F("text/plain");
+  } else if( fileExtension == F("pdf") ) {
+    contentType = F("application/pdf");
+  } else if( fileExtension == F("zip") ) {
+    contentType = F("application/zip");
+  } else if( fileExtension == F("gz") ) {
+    contentType = F("application/gzip");
+  } else if( fileExtension == F("mp3") ) {
+    contentType = F("audio/mp3");
+  } else if( fileExtension == F("mp4") ) {
+    contentType = F("video/mp4");
+  } else {
+    contentType = F("application/octet-stream");
+  }
+  return contentType;
+}
 
 
 //eeprom functionality
@@ -1455,7 +1496,7 @@ void handleWebServerGet() {
   addHtmlPageEnd( content );
 
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-  wifiWebServer.send( 200, F("text/html"), content );
+  wifiWebServer.send( 200, getContentType( F("html") ), content );
 }
 
 const char HTML_PAGE_FILLUP_START[] PROGMEM = "<style>"
@@ -1499,7 +1540,7 @@ void handleWebServerPost() {
     content += String( F("<h2>Error: Missing SSID Name</h2>") );
     addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, F("text/html"), content );
+    wifiWebServer.send( 400, getContentType( F("html") ), content );
     return;
   }
   if( htmlPageSsidPasswordReceived.length() == 0 ) {
@@ -1507,7 +1548,7 @@ void handleWebServerPost() {
     content += String( F("<h2>Error: Missing SSID Password</h2>") );
     addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, F("text/html"), content );
+    wifiWebServer.send( 400, getContentType( F("html") ), content );
     return;
   }
   if( htmlPageSsidNameReceived.length() > getWiFiClientSsidNameMaxLength() ) {
@@ -1515,7 +1556,7 @@ void handleWebServerPost() {
     content += String( F("<h2>Error: SSID Name exceeds maximum length of ") ) + String( getWiFiClientSsidNameMaxLength() ) + String( F("</h2>") );
     addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, F("text/html"), content );
+    wifiWebServer.send( 400, getContentType( F("html") ), content );
     return;
   }
   if( htmlPageSsidPasswordReceived.length() > getWiFiClientSsidPasswordMaxLength() ) {
@@ -1523,7 +1564,7 @@ void handleWebServerPost() {
     content += String( F("<h2>Error: SSID Password exceeds maximum length of ") ) + String( getWiFiClientSsidPasswordMaxLength() ) + String( F("</h2>") );
     addHtmlPageEnd( content );
     wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, F("text/html"), content );
+    wifiWebServer.send( 400, getContentType( F("html") ), content );
     return;
   }
 
@@ -1698,7 +1739,7 @@ void handleWebServerPost() {
   content += getHtmlPageFillup( waitTime, waitTime ) + String( F("<h2>Зберігаю...</h2>") );
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-  wifiWebServer.send( 200, F("text/html"), content );
+  wifiWebServer.send( 200, getContentType( F("html") ), content );
 
   bool isDisplayIntensityUpdateRequired = false;
   bool isDisplayRerenderRequired = false;
@@ -1857,38 +1898,47 @@ void handleWebServerGetTimer() {
   String hours = wifiWebServer.arg("h");
   unsigned long millisToUse = 0;
 
-  handleWebServerGet();
-
-  if( !seconds.isEmpty() && seconds.length() <= 5 && containsOnlyDigits( seconds ) ) {
-    millisToUse += seconds.toInt();
-  }
-  if( !minutes.isEmpty() && minutes.length() <= 4 && containsOnlyDigits( minutes ) ) {
-    millisToUse += minutes.toInt() * 60;
-  }
-  if( !hours.isEmpty() && hours.length() <= 2 && containsOnlyDigits( hours ) ) {
-    millisToUse += hours.toInt() * 60 * 60;
-  }
-  millisToUse = millisToUse * 1000;
-  if( millisToUse >= TIMER_MAX_TIME_TO_SET_UP ) {
-    return;
-  }
-
-  stopBeepingOrBlinking();
-  exitTimerSetupMode();
-
-  if( !isTimerRunning && millisToUse == 0 ) return;
-
-  timerCurrentSetupInMillis = millisToUse;
-
-  if( isTimerRunning ) {
-    if( timerCurrentSetupInMillis == 0 && cancelTimer() ) {
-      startShortBeep();
+  if( !seconds.isEmpty() || !minutes.isEmpty() || !hours.isEmpty() ) {
+    if( !seconds.isEmpty() && seconds.length() <= 5 && containsOnlyDigits( seconds ) ) {
+      millisToUse += seconds.toInt();
     }
-  } else {
-    if( startTimer() ) {
-      startShortBeep();
+    if( !minutes.isEmpty() && minutes.length() <= 4 && containsOnlyDigits( minutes ) ) {
+      millisToUse += minutes.toInt() * 60;
+    }
+    if( !hours.isEmpty() && hours.length() <= 2 && containsOnlyDigits( hours ) ) {
+      millisToUse += hours.toInt() * 60 * 60;
+    }
+    millisToUse = millisToUse * 1000;
+    if( millisToUse > TIMER_MAX_TIME_TO_SET_UP ) {
+      millisToUse = TIMER_MAX_TIME_TO_SET_UP;
+    }
+
+    stopBeepingOrBlinking();
+    exitTimerSetupMode();
+
+    if( isTimerRunning || millisToUse != 0 ) {
+      timerCurrentSetupInMillis = millisToUse;
+
+      if( isTimerRunning ) {
+        if( timerCurrentSetupInMillis == 0 && cancelTimer() ) {
+          startShortBeep();
+        }
+      } else {
+        if( startTimer() ) {
+          startShortBeep();
+        }
+      }
     }
   }
+
+  String content = String( F("{ "
+    "\"active\": ") ) + ( isTimerRunning ? String( F("true") ) : String( F("false") ) ) + String( F(", "
+    "\"setup\": ") ) + ( isTimerRunning ? String( timerCurrentSetupInMillis / 1000 ) : String( F("null") ) ) + String( F(", "
+    "\"remaining\": ") ) + ( isTimerRunning ? String( ( timerCurrentStartedTimeMillis + timerCurrentSetupInMillis < millis() ? 0 : timerCurrentStartedTimeMillis + timerCurrentSetupInMillis - millis() ) / 1000 ) : String( F("null") ) ) + String( F(" "
+  "}") );
+  wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
+  wifiWebServer.send( 200, getContentType( F("json") ), content );
+
 }
 
 void handleWebServerGetTestNight() {
@@ -1897,7 +1947,7 @@ void handleWebServerGetTestNight() {
   content += getHtmlPageFillup( "5", "5" ) + String( F("<h2>Перевіряю нічний режим...</h2>") );
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-  wifiWebServer.send( 200, F("text/html"), content );
+  wifiWebServer.send( 200, getContentType( F("html") ), content );
     setDisplayBrightness( displayNightModeBrightness );
     renderDisplay();
     delay( 6000 );
@@ -1911,7 +1961,7 @@ void handleWebServerGetTestLeds() {
   content += getHtmlPageFillup( "20", "20" ) + String( F("<h2>Перевіряю матрицю...</h2>") );
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-  wifiWebServer.send( 200, F("text/html"), content );
+  wifiWebServer.send( 200, getContentType( F("html") ), content );
   for( uint8_t row = 0; row < 8; ++row ) {
     for( uint8_t y = 0; y < 8; ++y ) {
       for( uint8_t x = 0; x < 32; ++x ) {
@@ -1963,7 +2013,7 @@ void handleWebServerGetReboot() {
   content += getHtmlPageFillup( "9", "9" ) + String( F("<h2>Перезавантажуюсь...</h2>") );
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-  wifiWebServer.send( 200, F("text/html"), content );
+  wifiWebServer.send( 200, getContentType( F("html") ), content );
   delay( 200 );
   ESP.restart();
 }
@@ -1976,13 +2026,13 @@ const uint8_t FAVICON_ICO_GZ[] PROGMEM = {
 
 void handleWebServerGetFavIcon() {
   wifiWebServer.sendHeader( F("Content-Encoding"), F("gzip") );
-  wifiWebServer.send_P( 200, String( F("image/x-icon") ).c_str(), (const char*)FAVICON_ICO_GZ, sizeof(FAVICON_ICO_GZ) );
+  wifiWebServer.send_P( 200, getContentType( F("ico") ).c_str(), (const char*)FAVICON_ICO_GZ, sizeof(FAVICON_ICO_GZ) );
   return;
 }
 
 void handleWebServerRedirect() {
   wifiWebServer.sendHeader( F("Location"), String( F("http://") ) + WiFi.softAPIP().toString() );
-  wifiWebServer.send( 302, F("text/html"), "" );
+  wifiWebServer.send( 302, getContentType( F("html") ), "" );
   wifiWebServer.client().stop();
 }
 
