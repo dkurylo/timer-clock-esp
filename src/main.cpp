@@ -1,7 +1,6 @@
 #include <Arduino.h>
 
 #include <vector>
-#include <map>
 
 #ifdef ESP8266
 #include <ESP8266WiFi.h>
@@ -570,11 +569,16 @@ void setDisplayBrightness( bool isInit ) {
   }
 }
 
+void initDisplayFont( uint8_t fontIndex ) {
+  TCFonts::initFont( fontIndex );
+}
+
 void initDisplay() {
   calculateDisplayBrightness();
   display.begin();
   setDisplayBrightness( true );
   display.clear();
+  initDisplayFont( displayFontTypeNumber );
 }
 
 void brightnessProcessLoopTick() {
@@ -650,7 +654,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
     std::vector<uint8_t> charImagePrevious;
     if( isDisplayAnimationInProgress ) {
       bool isAnimatable = false;
@@ -662,7 +666,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       if( isAnimatable && charToDisplayIndex < textToDisplayLargeAnimated.length() ) {
         char charToDisplayPrevious = textToDisplayLargeAnimated.charAt( charToDisplayIndex );
         if( charToDisplay != charToDisplayPrevious ) {
-          charImagePrevious = TCFonts::getSymbol( displayFontTypeNumber, charToDisplayPrevious, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+          charImagePrevious = TCFonts::getSymbol( charToDisplayPrevious, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
         }
       }
     }
@@ -721,7 +725,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
 
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
@@ -1743,6 +1747,7 @@ void handleWebServerPost() {
 
   bool isDisplayIntensityUpdateRequired = false;
   bool isDisplayRerenderRequired = false;
+  bool isDisplayFontInitRequired = false;
 
   if( timerSetupResetTimeSecondsReceivedPopulated && timerSetupResetTimeSecondsReceived != timerSetupResetTimeSeconds ) {
     timerSetupResetTimeSeconds = timerSetupResetTimeSecondsReceived;
@@ -1811,6 +1816,7 @@ void handleWebServerPost() {
   if( displayFontTypeNumberReceivedPopulated && displayFontTypeNumberReceived != displayFontTypeNumber ) {
     displayFontTypeNumber = displayFontTypeNumberReceived;
     isDisplayRerenderRequired = true;
+    isDisplayFontInitRequired = true;
     Serial.println( F("Display font updated") );
     writeEepromIntValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumberReceived );
   }
@@ -1867,6 +1873,9 @@ void handleWebServerPost() {
 
   if( isDisplayIntensityUpdateRequired ) {
     setDisplayBrightness( true );
+  }
+  if( isDisplayFontInitRequired ) {
+    initDisplayFont( displayFontTypeNumber );
   }
   if( isDisplayRerenderRequired ) {
     renderDisplay();
