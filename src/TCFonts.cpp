@@ -1,49 +1,44 @@
 #include "TCFonts.h"
 
+bool TCFonts::isFontInitialised = false;
+uint8_t TCFonts::fontIndex = 0;
+std::map<String, std::vector<uint8_t>> TCFonts::symbols;
+
 uint8_t TCFonts::getSymbolWidth( uint8_t fontIndex, char symbol, bool isBold, bool isWide, bool isProgress, bool isSmall ) {
-      switch( fontIndex ) {
-        case 0: {
-          switch( isSmall ) {
-            case false: {
-              switch( symbol ) {
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7': 
-                case '8':
-                case '9':
-                case '0':
-                case ' ':
-                case '-': {
-                  switch( isWide ) {
-                    case true: {
-                      return 7;
-                    }
-                    case false: {
-                      return 5;
-                    }
-                  }
+  switch( fontIndex ) {
+    case 0: {
+      switch( isSmall ) {
+        case false: {
+          switch( symbol ) {
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7': 
+            case '8':
+            case '9':
+            case '0':
+            case ' ':
+            case '-': {
+              switch( isWide ) {
+                case true: {
+                  return 7;
                 }
-                case ':':
-                case '\b':
-                case '\f':
-                case '\t': {
-                  switch( isWide ) {
-                    case true: {
-                      return 4;
-                    }
-                    case false: {
-                      return 4;
-                    }
-                  }
+                case false: {
+                  return 5;
                 }
               }
             }
-            case true: {
+            case ':':
+            case '\b':
+            case '\f':
+            case '\t': {
               switch( isWide ) {
+                case true: {
+                  return 4;
+                }
                 case false: {
                   return 4;
                 }
@@ -51,60 +46,67 @@ uint8_t TCFonts::getSymbolWidth( uint8_t fontIndex, char symbol, bool isBold, bo
             }
           }
         }
-        case 1: {
-          switch( isSmall ) {
+        case true: {
+          switch( isWide ) {
             case false: {
-              switch( symbol ) {
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':
-                case '8':
-                case '9':
-                case '0':
-                case ' ':
-                case '-': {
-                  switch( isWide ) {
-                    case true: {
-                      return 7;
-                    }
-                    case false: {
-                      return 5;
-                    }
-                  }
-                }
-                case ':':
-                case '\b':
-                case '\f':
-                case '\t': {
-                  switch( isWide ) {
-                    case true: {
-                      return 4;
-                    }
-                    case false: {
-                      return 4;
-                    }
-                  }
-                }
-              }
-            }
-            case true: {
-              switch( isWide ) {
-                case false: {
-                  return 4;
-                }
-              }
+              return 4;
             }
           }
         }
       }
-      return 0;
     }
-
-std::map<String, std::vector<uint8_t>> TCFonts::symbols;
+    case 1: {
+      switch( isSmall ) {
+        case false: {
+          switch( symbol ) {
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+            case '0':
+            case ' ':
+            case '-': {
+              switch( isWide ) {
+                case true: {
+                  return 7;
+                }
+                case false: {
+                  return 5;
+                }
+              }
+            }
+            case ':':
+            case '\b':
+            case '\f':
+            case '\t': {
+              switch( isWide ) {
+                case true: {
+                  return 4;
+                }
+                case false: {
+                  return 4;
+                }
+              }
+            }
+          }
+        }
+        case true: {
+          switch( isWide ) {
+            case false: {
+              return 4;
+            }
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
 
 void TCFonts::initFont0() {
   TCFonts::symbols = {};
@@ -1952,17 +1954,19 @@ void TCFonts::initFont1() {
                              0b00000000 };
 }
 
-void TCFonts::initFont( uint8_t fontIndex ) {
-  if( fontIndex == 0 ) {
-    TCFonts::initFont0();
-  } else if( fontIndex == 1 ) {
-    TCFonts::initFont1();
-  } else {
-    TCFonts::initFont0();
+std::vector<uint8_t> TCFonts::getSymbol( uint8_t fontIndex, char symbol, bool isBold, bool isWide, bool isProgress, bool isSmall ) {
+  if( !TCFonts::isFontInitialised || TCFonts::fontIndex != fontIndex ) {
+    TCFonts::isFontInitialised = true;
+    TCFonts::fontIndex = fontIndex;
+    if( fontIndex == 0 ) {
+      TCFonts::initFont0();
+    } else if( fontIndex == 1 ) {
+      TCFonts::initFont1();
+    } else {
+      TCFonts::initFont0();
+    }
   }
-}
 
-std::vector<uint8_t> TCFonts::getSymbol( char symbol, bool isBold, bool isWide, bool isProgress, bool isSmall ) {
   String key;
   if( isSmall ) {
     //symbol - isProgress
