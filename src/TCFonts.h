@@ -14,5 +14,6 @@ class TCFonts {
     static std::map<String, std::vector<uint8_t>> symbols;
     static void initFont0();
     static void initFont1();
+    static void initFont2();
 
 };
