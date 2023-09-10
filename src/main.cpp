@@ -17,6 +17,7 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <EEPROM.h>
+#include <LittleFS.h>
 
 #include <MD_MAX72xx.h>
 #include <EncButton.h>
@@ -218,6 +219,29 @@ String getContentType( String fileExtension ) {
     contentType = F("application/octet-stream");
   }
   return contentType;
+}
+
+File getFileFromFlash( String fileName ) {
+  bool isGzippedFileRequested = fileName.endsWith( F(".gz") );
+
+  Serial.println(isGzippedFileRequested); //xxx
+  File root = LittleFS.open("/", "r");
+  if (!root || !root.isDirectory()) {
+    Serial.println("Failed to open directory");
+  } else {
+    Serial.println("Succeeded to open directory");
+  }
+  File file2 = root.openNextFile();
+  while (file2) {
+    Serial.print(file2.name());
+    file2 = root.openNextFile();
+  }
+
+  File file = LittleFS.open( "/" + fileName + ( isGzippedFileRequested ? "" : ".gz" ), "r" );
+  if( !isGzippedFileRequested && !file ) {
+    file = LittleFS.open( "/" + fileName, "r" );
+  }
+  return file;
 }
 
 
@@ -1338,6 +1362,8 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".stat>span{padding:1px 4px;display:inline-block;}"
       ".stat>span:first-of-type{background-color:#666;}"
       ".stat>span:not(:last-of-type){border-right:1px solid #DDD;}"
+      "#exm{width:100%;background-color:#222;opacity:0.8;padding:0.8em;line-height:0;}"
+      "#exm>img{width:100%;image-rendering:pixelated;aspect-ratio:32/8;}"
       "@media(max-device-width:800px) and (orientation:portrait){"
         ":root{--f:4vw;}"
         ".wrp{width:94%;max-width:100%;}"
@@ -1382,7 +1408,7 @@ const char* HTML_INPUT_RADIO = "radio";
 const char* HTML_INPUT_COLOR = "color";
 const char* HTML_INPUT_RANGE = "range";
 
-String getHtmlInput( String label, const char* type, const char* value, const char* elId, const char* elName, uint8_t minLength, uint8_t maxLength, bool isRequired, bool isChecked ) {
+String getHtmlInput( String label, const char* type, const char* value, const char* elId, const char* elName, uint8_t minLength, uint8_t maxLength, bool isRequired, bool isChecked, const char* additional ) {
   return ( (strcmp(type, HTML_INPUT_TEXT) == 0 || strcmp(type, HTML_INPUT_PASSWORD) == 0 || strcmp(type, HTML_INPUT_COLOR) == 0 || strcmp(type, HTML_INPUT_RANGE) == 0) ? getHtmlLabel( label, elId, true ) : "" ) +
     String( F("<input"
       " type=\"") ) + type + String( F("\""
@@ -1392,6 +1418,7 @@ String getHtmlInput( String label, const char* type, const char* value, const ch
       ( (strcmp(type, HTML_INPUT_CHECKBOX) != 0) ? String( F(" value=\"") ) + String( value ) + "\"" : "" ) +
       ( isRequired && (strcmp(type, HTML_INPUT_TEXT) == 0 || strcmp(type, HTML_INPUT_PASSWORD) == 0) ? F(" required") : F("") ) +
       ( isChecked && (strcmp(type, HTML_INPUT_RADIO) == 0 || strcmp(type, HTML_INPUT_CHECKBOX) == 0) ? F(" checked") : F("") ) +
+      ( " " + String( additional ) ) +
       ( (strcmp(type, HTML_INPUT_RANGE) == 0) ? String( F(" min=\"") ) + String( minLength ) + String( F("\" max=\"") ) + String(maxLength) + String( F("\" oninput=\"this.nextElementSibling.value=this.value;\"><output>") ) + String( value ) + String( F("</output") ) : "" ) +
     ">" +
       ( (strcmp(type, HTML_INPUT_TEXT) != 0 && strcmp(type, HTML_INPUT_PASSWORD) != 0 && strcmp(type, HTML_INPUT_COLOR) != 0 && strcmp(type, HTML_INPUT_RANGE) != 0) ? getHtmlLabel( label, elId, false ) : "" );
@@ -1402,6 +1429,7 @@ const uint8_t getWiFiClientSsidPasswordMaxLength() { return WIFI_PASSWORD_MAX_LE
 
 const char* HTML_PAGE_ROOT_ENDPOINT = "/";
 const char* HTML_PAGE_TIMER_ENDPOINT = "/timer";
+const char* HTML_PAGE_DATA_ENDPOINT = "/data";
 const char* HTML_PAGE_REBOOT_ENDPOINT = "/reboot";
 const char* HTML_PAGE_TESTLED_ENDPOINT = "/testled";
 const char* HTML_PAGE_TEST_NIGHT_ENDPOINT = "/testdim";
@@ -1439,35 +1467,36 @@ void handleWebServerGet() {
   "<form method=\"POST\">"
   "<div class=\"fx\">"
     "<h2>Приєднатись до WiFi:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), true, false ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), true, false ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), true, false, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), true, false, "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування таймера:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, false, isTimerAnimated ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, false, isTimerAnimated, "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування годинника:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, false, isClockAnimated ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, false, isClockAnimated, "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness ) + String( F("</div>"
+    "<div class=\"fi pl\"><div id=\"exm\"></div></div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness, "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx ft\">"
     "<div class=\"fi\"><button type=\"submit\">Застосувати</button></div>"
@@ -1491,7 +1520,15 @@ void handleWebServerGet() {
       "<div class=\"stat\"><span>Яскравість</span><span>CUR ") ) + String( analogRead(A0) ) + String( F("</span><span>AVG ") ) + String( sensorBrightnessAverage ) + String( F("</span><span>REQ ") ) + String( displayCurrentBrightness ) + String( F("</span><span>DSP ") ) + String( static_cast<uint8_t>( round( displayPreviousBrightness ) ) ) + String( F("</span></div>"
     "</span>"
   "</div>"
-"</div>") );
+"</div>"
+"<script>"
+  "function pw(){"
+    "document.getElementById('exm').innerHTML='<img src=\"/data?f=f'+document.getElementById('fnt').value+(document.getElementById('bld').checked?'b':'')+(document.getElementById('sec').checked?'s':'')+'.gif\">';"
+  "}"
+  "document.addEventListener(\"DOMContentLoaded\",()=>{"
+    "pw();"
+  "});"
+"</script>") );
   addHtmlPageEnd( content );
 
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
@@ -1940,6 +1977,26 @@ void handleWebServerGetTimer() {
 
 }
 
+void handleWebServerGetData() {
+  String fileName = wifiWebServer.arg("f");
+  Serial.println(fileName); //xxx
+  if( fileName != "" ) {
+    File file = getFileFromFlash( fileName );
+    if( !file ) {
+      wifiWebServer.send( 404, getContentType( F("txt") ), F("File not found") );
+    } else {
+      String fileExtension = "";
+      int fileExtensionDot = fileName.lastIndexOf(".");
+      if( fileExtensionDot != -1 ) {
+          fileExtension = fileName.substring( fileExtensionDot + 1 );
+      }
+      wifiWebServer.streamFile( file, getContentType( fileExtension ) );
+      file.close();
+    }
+    return;
+  }
+}
+
 void handleWebServerGetTestNight() {
   String content;
   addHtmlPageStart( content );
@@ -2054,6 +2111,7 @@ void configureWebServer() {
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_GET,  handleWebServerGet );
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_POST, handleWebServerPost );
   wifiWebServer.on( HTML_PAGE_TIMER_ENDPOINT, HTTP_GET,  handleWebServerGetTimer );
+  wifiWebServer.on( HTML_PAGE_DATA_ENDPOINT, HTTP_GET, handleWebServerGetData );
   wifiWebServer.on( HTML_PAGE_TEST_NIGHT_ENDPOINT, HTTP_GET, handleWebServerGetTestNight );
   wifiWebServer.on( HTML_PAGE_TESTLED_ENDPOINT, HTTP_GET, handleWebServerGetTestLeds );
   wifiWebServer.on( HTML_PAGE_REBOOT_ENDPOINT, HTTP_GET, handleWebServerGetReboot );
@@ -2084,6 +2142,7 @@ void setup() {
   loadEepromData();
   initVariables();
   initDisplay();
+  LittleFS.begin();
 
   configureWebServer();
   wiFiEventHandler = WiFi.onStationModeConnected( &onWiFiConnected );
