@@ -622,7 +622,7 @@ void cancelDisplayAnimation() {
 }
 
 bool isSemicolonShown = true;
-void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bool doAnimate ) {
+void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bool isSecondsShown, bool doAnimate ) {
   unsigned long currentMillis = millis();
 
   char charsAnimatable[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
@@ -668,12 +668,12 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
   uint8_t displayWidthUsed = 0;
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
     std::vector<uint8_t> charImagePrevious;
     if( isDisplayAnimationInProgress ) {
       bool isAnimatable = false;
@@ -685,7 +685,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       if( isAnimatable && charToDisplayIndex < textToDisplayLargeAnimated.length() ) {
         char charToDisplayPrevious = textToDisplayLargeAnimated.charAt( charToDisplayIndex );
         if( charToDisplay != charToDisplayPrevious ) {
-          charImagePrevious = TCFonts::getSymbol( displayFontTypeNumber, charToDisplayPrevious, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+          charImagePrevious = TCFonts::getSymbol( displayFontTypeNumber, charToDisplayPrevious, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
         }
       }
     }
@@ -739,12 +739,12 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
 
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplaySmall.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplaySmall.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isDisplaySecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
 
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
@@ -798,13 +798,15 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
-    String minuteStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
+    bool isSecondsShown = isDisplaySecondsShown || hour > 0;
+
+    String hourStr = ( ( isSingleDigitHourShown && !isSecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
+    String minuteStr = ( ( isSingleDigitHourShown && !isSecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
-    String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + ( isSemicolonShown ? "\b" : "\f" ) + minuteStr ) : ( minuteStr + ( isSemicolonShown ? "\b" : "\f" ) + secondStr );
-    String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isTimerAnimated );
+    String textToDisplayLarge = ( isSecondsShown || hour > 0 ) ? ( hourStr + ( isSemicolonShown ? "\b" : "\f" ) + minuteStr ) : ( minuteStr + ( isSemicolonShown ? "\b" : "\f" ) + secondStr );
+    String textToDisplaySmall = isSecondsShown ? secondStr : String( "" );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isSecondsShown, isTimerAnimated );
     renderProgressIndicator( timerRemainingMillis );
 
   } else if( isTimerSetupRunning ) {
@@ -814,13 +816,15 @@ void renderDisplay() {
     remainingMillis %= (1000UL * 60UL);
     unsigned long second = remainingMillis / 1000UL;
 
-    String hourStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
-    String minuteStr = ( ( isSingleDigitHourShown && !isDisplaySecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
+    bool isSecondsShown = isDisplaySecondsShown || hour > 0;
+
+    String hourStr = ( ( isSingleDigitHourShown && !isSecondsShown && hour == 0 ) ? ( "  " ) : ( ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour ) ) );
+    String minuteStr = ( ( isSingleDigitHourShown && !isSecondsShown && hour == 0 && minute < 10 ) ? ( " " ) : ( ( minute < 10 ? "0" : "" ) ) ) + String( minute );
     String secondStr = ( second < 10 ? "0" : "" ) + String( second );
 
-    String textToDisplayLarge = ( isDisplaySecondsShown || hour > 0 ) ? ( hourStr + String( ":" ) + minuteStr ) : ( minuteStr + String( ":" ) + secondStr );
-    String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
+    String textToDisplayLarge = ( isSecondsShown || hour > 0 ) ? ( hourStr + String( ":" ) + minuteStr ) : ( minuteStr + String( ":" ) + secondStr );
+    String textToDisplaySmall = isSecondsShown ? secondStr : String( "" );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isSecondsShown, false );
 
   } else if( isTimerBlinking ) {
     if( calculateDiffMillis( timerBlinkingLastUpdateMillis, millis() ) >= TIMER_BLINKING_DELAY ) {
@@ -830,7 +834,7 @@ void renderDisplay() {
 
     String textToDisplayLarge = isTimerBlinkingShown ? ( isSingleDigitHourShown ? String(" 0:00") : String( "00:00" ) ) : String( "  \t  " );
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isDisplaySecondsShown, false );
 
   } else if( timeClient.isTimeSet() ) {
     time_t dt = timeClient.getEpochTime();
@@ -848,11 +852,11 @@ void renderDisplay() {
 
     String textToDisplayLarge = hourStr + ( isSemicolonShown ? ":" : "\t" ) + minuteStr;
     String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isClockAnimated );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isDisplaySecondsShown, isClockAnimated );
   } else {
     String textToDisplayLarge = String( "  " ) + ( isSemicolonShown ? ":" : "\t" ) + String( "  " );
     String textToDisplaySmall = isDisplaySecondsShown ? String( "  " ) : String( "" );
-    renderDisplayText( textToDisplayLarge, textToDisplaySmall, false );
+    renderDisplayText( textToDisplayLarge, textToDisplaySmall, isDisplaySecondsShown, false );
   }
   display.update();
 }
@@ -1367,10 +1371,10 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       "#exdw>div{position:relative;}"
       "#exdw #exdi>img{width:100%;image-rendering:pixelated;aspect-ratio:32/8;}"
       "#exdw #exdm{width:100%;height:100%;position:absolute;top:0;display:flex;flex-wrap:wrap;}"
-      "#exdw #exdm>div{width:calc(100% / 32);height:calc(100% / 8);background:radial-gradient(transparent,transparent 55%,#222 65%);}"
-      "#exlw,#exrw{width:24%;flex-wrap:wrap;align-content:center;justify-content:flex-end;display:none;}"
+      "#exdw #exdm>div{width:calc(100% / 32);height:calc(100% / 8);background:radial-gradient(RGBA(34,34,34,0) 55%,RGBA(34,34,34,1) 65%);}"
+      "#exlw,#exrw{width:24%;flex-wrap:wrap;align-items:center;justify-content:flex-end;display:none;}"
       "#exrw{justify-content:flex-start;}"
-      "#exlw>div,#exrw>div{height:calc(75% - 2*0.2em);aspect-ratio:1;padding:0.2em;border-radius:50%;background:conic-gradient(from 0deg,#666,#EEE,#666,#999,#666,#EEE,#666,#999,#666);}"
+      "#exlw>div,#exrw>div{height:calc(75% - 2*0.2em);width:calc(75% - 2*0.2em);padding:0.2em;border-radius:50%;background:conic-gradient(from 0deg,#666,#EEE,#666,#999,#666,#EEE,#666,#999,#666);}"
       "#exlw>div>div,#exrw>div>div{height:100%;border-radius:50%;background:conic-gradient(from 0deg,#222,#777,#222,#000,#222,#777,#222,#000,#222);}"
       "@media(max-device-width:800px) and (orientation:portrait){"
         ":root{--f:4vw;}"
