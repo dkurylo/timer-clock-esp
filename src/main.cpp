@@ -224,7 +224,6 @@ String getContentType( String fileExtension ) {
 File getFileFromFlash( String fileName ) {
   bool isGzippedFileRequested = fileName.endsWith( F(".gz") );
 
-  Serial.println(isGzippedFileRequested); //xxx
   File root = LittleFS.open("/", "r");
   if (!root || !root.isDirectory()) {
     Serial.println("Failed to open directory");
@@ -666,6 +665,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
   }
 
   uint8_t displayWidthUsed = 0;
+  std::map<String, std::vector<uint8_t>> font = TCFonts::getFont( displayFontTypeNumber );
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
     uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
@@ -673,7 +673,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
     std::vector<uint8_t> charImagePrevious;
     if( isDisplayAnimationInProgress ) {
       bool isAnimatable = false;
@@ -685,7 +685,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       if( isAnimatable && charToDisplayIndex < textToDisplayLargeAnimated.length() ) {
         char charToDisplayPrevious = textToDisplayLargeAnimated.charAt( charToDisplayIndex );
         if( charToDisplay != charToDisplayPrevious ) {
-          charImagePrevious = TCFonts::getSymbol( displayFontTypeNumber, charToDisplayPrevious, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+          charImagePrevious = TCFonts::getSymbol( font, charToDisplayPrevious, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
         }
       }
     }
@@ -744,7 +744,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
 
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
@@ -775,6 +775,61 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       }
     }
   }
+}
+
+std::vector<std::vector<bool>> getDisplayPreview( uint8_t fontNumber, bool isBold, bool isSecondsShown, String textToDisplayLarge, String textToDisplaySmall ) {
+  std::vector<std::vector<bool>> preview( DISPLAY_HEIGHT, std::vector<bool>( DISPLAY_WIDTH, false ) );
+
+  uint8_t displayWidthUsed = 0;
+  std::map<String, std::vector<uint8_t>> font = TCFonts::getFont( fontNumber );
+
+  for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
+    char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
+    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
+      charWidth = DISPLAY_WIDTH - displayWidthUsed;
+    }
+    if( charWidth == 0 ) continue;
+
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
+      for( uint8_t charX = 0; charX < charWidth; ++charX ) {
+        bool isPointEnabled = false;
+        uint8_t charShiftY = DISPLAY_HEIGHT - charImage.size();
+        if( displayY >= charShiftY ) {
+          uint8_t charY = displayY - charShiftY;
+          isPointEnabled = ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1;
+        }
+        preview[displayY][displayWidthUsed+charX] = isPointEnabled;
+      }
+    }
+    displayWidthUsed += charWidth;
+  }
+
+  for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplaySmall.length(); ++charToDisplayIndex ) {
+    char charToDisplay = textToDisplaySmall.charAt( charToDisplayIndex );
+    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
+      charWidth = DISPLAY_WIDTH - displayWidthUsed;
+    }
+    if( charWidth == 0 ) continue;
+
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
+      for( uint8_t charX = 0; charX < charWidth; ++charX ) {
+        bool isPointEnabled = false;
+        uint8_t charShiftY = DISPLAY_HEIGHT - charImage.size();
+        if( displayY >= charShiftY ) {
+          uint8_t charY = displayY - charShiftY;
+          isPointEnabled = ( charImage[charY] >> ( DISPLAY_HEIGHT - 1 - charX ) ) & 1;
+        }
+        preview[displayY][displayWidthUsed + charX] = isPointEnabled;
+      }
+    }
+    displayWidthUsed += charWidth;
+  }
+
+  return preview;
 }
 
 void renderProgressIndicator( unsigned long timerRemainingMillis ) {
@@ -1188,16 +1243,34 @@ void timerProcessLoopTick() {
   }
 }
 
+const unsigned long PUSH_DEBOUNCE_TIMEOUT_MILLIS = 250;
+bool isPushDebouncing = false; //blocks turns after a button is pressed for DEBOUNCE_TIMEOUT_MILLIS ms
+unsigned long pushDebounceStartMillis = 0;
+
 void encoderProcessLoopTick() {
   enc.tick();
-  if( enc.left() || enc.leftH() ) {
-    timerTurnLeft();
-  } else if( enc.right() || enc.rightH() ) {
-    timerTurnRight();
+
+  if( isPushDebouncing && calculateDiffMillis( pushDebounceStartMillis, millis() ) >= PUSH_DEBOUNCE_TIMEOUT_MILLIS ) {
+    isPushDebouncing = false;
+    pushDebounceStartMillis = 0;
+  }
+
+  if( !enc.hold() && enc.left() ) {
+    if( !isPushDebouncing ) {
+      timerTurnLeft();
+    }
+  } else if( !enc.hold() && enc.right() ) {
+    if( !isPushDebouncing ) {
+      timerTurnRight();
+    }
   } else if( enc.click() ) {
     timerButtonShortPress();
+    isPushDebouncing = true;
+    pushDebounceStartMillis = millis();
   } else if( enc.held() ) {
     timerButtonLongPress();
+    isPushDebouncing = true;
+    pushDebounceStartMillis = millis();
   }
 }
 
@@ -1367,11 +1440,10 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".stat>span:first-of-type{background-color:#666;}"
       ".stat>span:not(:last-of-type){border-right:1px solid #DDD;}"
       "#exw{width:100%;display:flex;background-image:linear-gradient(-180deg,#777,#222 7% 93%,#000);}"
-      "#exdw{width:76%;padding:2.3% 5.38%;line-height:0;}"
-      "#exdw>div{position:relative;}"
-      "#exdw #exdi>img{width:100%;image-rendering:pixelated;aspect-ratio:32/8;}"
-      "#exdw #exdm{width:100%;height:100%;position:absolute;top:0;display:flex;flex-wrap:wrap;}"
-      "#exdw #exdm>div{width:calc(100% / 32);height:calc(100% / 8);background:radial-gradient(RGBA(34,34,34,0) 55%,RGBA(34,34,34,1) 65%);}"
+      "#exdw{width:76%;padding:2.3% 5.38%;aspect-ratio:32/8;}"
+      "#exdw .exdl{display:flex;flex-wrap:nowrap;}"
+      "#exdw .exdp{width:calc(100%/32);aspect-ratio:1;}"
+      "#exdw .exdp.exdp1{background:radial-gradient(RGBA(16,192,0,1) 55%,RGBA(34,34,34,0) 65%);}"
       "#exlw,#exrw{width:24%;flex-wrap:wrap;align-items:center;justify-content:flex-end;display:none;}"
       "#exrw{justify-content:flex-start;}"
       "#exlw>div,#exrw>div{height:calc(75% - 2*0.2em);width:calc(75% - 2*0.2em);padding:0.2em;border-radius:50%;background:conic-gradient(from 0deg,#666,#EEE,#666,#999,#666,#EEE,#666,#999,#666);}"
@@ -1441,6 +1513,7 @@ const uint8_t getWiFiClientSsidPasswordMaxLength() { return WIFI_PASSWORD_MAX_LE
 
 const char* HTML_PAGE_ROOT_ENDPOINT = "/";
 const char* HTML_PAGE_TIMER_ENDPOINT = "/timer";
+const char* HTML_PAGE_PREVIEW_ENDPOINT = "/preview";
 const char* HTML_PAGE_DATA_ENDPOINT = "/data";
 const char* HTML_PAGE_REBOOT_ENDPOINT = "/reboot";
 const char* HTML_PAGE_TESTLED_ENDPOINT = "/testled";
@@ -1499,7 +1572,7 @@ void handleWebServerGet() {
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
-    "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"><div><div></div></div></div><div id=\"exdw\"><div><div id=\"exdi\"></div><div id=\"exdm\"></div></div></div><div id=\"exrw\"><div><div></div></div></div></div></div>"
+    "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"><div><div></div></div></div></div></div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
@@ -1535,14 +1608,20 @@ void handleWebServerGet() {
 "</div>"
 "<script>"
   "function pw(){"
-    "let src='/data?f=f'+document.querySelector('#fnt').value+(document.querySelector('#bld').checked?'b':'')+(document.querySelector('#sec').checked?'s':'')+'.gif';"
-    "let exdi=document.querySelector('#exdi img');"
-    "if(!exdi){"
-      "document.querySelector('#exdi').innerHTML='<img src=\"'+src+'\">';"
-      "document.querySelector('#exdm').innerHTML=(()=>{let m='';for(let i=0;i<256;i++)m+='<div></div>';return m;})();"
-    "}else{"
-      "if(exdi.src!=src)exdi.src=src;"
-    "}"
+    "fetch('/preview?f='+document.querySelector('#fnt').value+'&b='+(document.querySelector('#bld').checked?'1':'0')+'&s='+(document.querySelector('#sec').checked?'1':'0')).then(res=>{"
+      "return res.ok?res.json():[];"
+    "}).then(dt=>{"
+      "document.querySelector('#exdw').innerHTML=(()=>{"
+        "return dt.map(ln=>{"
+          "return '<div class=\"exdl\">'+"
+                 "ln.split('').map(p=>{"
+                   "return '<div class=\"exdp exdp'+(['0',' '].includes(p)?'0':'1')+'\"></div>';"
+                 "}).join('')+"
+                 "'</div>';"
+        "}).join('');"
+      "})();"
+    "}).catch(e=>{"
+    "});"
     "let rton=document.querySelector('#rt').checked;"
     "document.querySelector('#exlw').style.display=rton?'flex':'';"
     "document.querySelector('#exrw').style.display=rton?'':'flex';"
@@ -1801,6 +1880,7 @@ void handleWebServerPost() {
 
   bool isDisplayIntensityUpdateRequired = false;
   bool isDisplayRerenderRequired = false;
+  bool isFontUpdateRequired = false;
 
   if( timerSetupResetTimeSecondsReceivedPopulated && timerSetupResetTimeSecondsReceived != timerSetupResetTimeSeconds ) {
     timerSetupResetTimeSeconds = timerSetupResetTimeSecondsReceived;
@@ -1869,6 +1949,7 @@ void handleWebServerPost() {
   if( displayFontTypeNumberReceivedPopulated && displayFontTypeNumberReceived != displayFontTypeNumber ) {
     displayFontTypeNumber = displayFontTypeNumberReceived;
     isDisplayRerenderRequired = true;
+    isFontUpdateRequired = true;
     Serial.println( F("Display font updated") );
     writeEepromIntValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumberReceived );
   }
@@ -1923,6 +2004,9 @@ void handleWebServerPost() {
     writeEepromIntValue( eepromDisplayNightModeBrightnessIndex, displayNightModeBrightnessReceived );
   }
 
+  if( isFontUpdateRequired ) {
+    TCFonts::setFont( displayFontTypeNumber );
+  }
   if( isDisplayIntensityUpdateRequired ) {
     setDisplayBrightness( true );
   }
@@ -1999,9 +2083,33 @@ void handleWebServerGetTimer() {
 
 }
 
+void handleWebServerGetPreview() {
+  String fontNumberStr = wifiWebServer.arg("f");
+  if( !fontNumberStr.length() ) fontNumberStr = "0";
+  uint8_t fontNumber = static_cast<uint8_t>( atoi( fontNumberStr.c_str() ) );
+  String isBoldStr = wifiWebServer.arg("b");
+  bool isBold = isBoldStr == String( F("1") ) || isBoldStr == String( F("true") ) || isBoldStr == String( F("TRUE") ) || isBoldStr == String( F("True") );
+  String isSecondsShownStr = wifiWebServer.arg("s");
+  bool isSecondsShown = isSecondsShownStr == String( F("1") ) || isSecondsShownStr == String( F("true") ) || isSecondsShownStr == String( F("TRUE") ) || isSecondsShownStr == String( F("True") );
+
+  std::vector<std::vector<bool>> preview = getDisplayPreview( fontNumber, isBold, isSecondsShown, "21:46", "37" );
+  String response = "";
+  uint8_t lineNumber = 0;
+  response += "[\n";
+  for( const auto& row : preview ) {
+    response += "  \"";
+    for( const bool value : row ) {
+      response += String( value ? "1": " " );
+    }
+    lineNumber++;
+    response += "\"" + String( lineNumber < preview.size() ? "," : "" ) + String( F("\n") );
+  }
+  response += "]";
+  wifiWebServer.send( 200, getContentType( F("json") ), response );
+}
+
 void handleWebServerGetData() {
   String fileName = wifiWebServer.arg("f");
-  Serial.println(fileName); //xxx
   if( fileName != "" ) {
     File file = getFileFromFlash( fileName );
     if( !file ) {
@@ -2133,6 +2241,7 @@ void configureWebServer() {
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_GET,  handleWebServerGet );
   wifiWebServer.on( HTML_PAGE_ROOT_ENDPOINT, HTTP_POST, handleWebServerPost );
   wifiWebServer.on( HTML_PAGE_TIMER_ENDPOINT, HTTP_GET,  handleWebServerGetTimer );
+  wifiWebServer.on( HTML_PAGE_PREVIEW_ENDPOINT, HTTP_GET, handleWebServerGetPreview );
   wifiWebServer.on( HTML_PAGE_DATA_ENDPOINT, HTTP_GET, handleWebServerGetData );
   wifiWebServer.on( HTML_PAGE_TEST_NIGHT_ENDPOINT, HTTP_GET, handleWebServerGetTestNight );
   wifiWebServer.on( HTML_PAGE_TESTLED_ENDPOINT, HTTP_GET, handleWebServerGetTestLeds );
@@ -2164,6 +2273,7 @@ void setup() {
   loadEepromData();
   initVariables();
   initDisplay();
+  TCFonts::setFont( displayFontTypeNumber );
   LittleFS.begin();
 
   configureWebServer();
