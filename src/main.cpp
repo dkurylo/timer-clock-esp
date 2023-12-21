@@ -59,7 +59,7 @@ const bool INVERT_INTERNAL_LED = true;
 #else //ESP32 or ESP32S2
 const bool INVERT_INTERNAL_LED = false;
 #endif
-const bool INTERNAL_LED_IS_USED = true;
+const bool INTERNAL_LED_IS_USED = false;
 const uint16_t DELAY_INTERNAL_LED_ANIMATION_LOW = 59800;
 const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
 
@@ -123,10 +123,15 @@ bool isClockAnimated = false;
 uint8_t animationTypeNumber = 0;
 
 //brightness settings
-const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 50;
+const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
 const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
 const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 400;
 
+//custom datetime settings (used when there is no internet connection)
+bool isCustomDateTimeSet = false;
+unsigned long customDateTimeReceivedAt = 0;
+unsigned long customDateTimePrevMillis = 0;
+unsigned long customDateTime = 0;
 
 #ifdef ESP8266
 ESP8266WebServer wifiWebServer(80);
@@ -468,7 +473,7 @@ bool updateTimeClient( bool canWait ) {
     if( !isTimeClientInitialised ) {
       initTimeClient();
     }
-    if( isTimeClientInitialised ) {
+    if( isTimeClientInitialised && !isCustomDateTimeSet ) {
       Serial.print( F("Updating NTP time...") );
       timeClient.update();
       if( canWait ) {
@@ -537,7 +542,7 @@ void calculateDisplayBrightness() {
   if( sensorBrightnessAverage < 0 ) {
     sensorBrightnessAverage = (double)currentBrightness;
   } else {
-    uint8_t sensorBrightnessSamples = 50;
+    uint8_t sensorBrightnessSamples = 15;
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( static_cast<double>(sensorBrightnessSamples) - static_cast<double>(1.0) ) + currentBrightness ) / static_cast<double>(sensorBrightnessSamples);
   }
 
@@ -891,8 +896,22 @@ void renderDisplay() {
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
     renderDisplayText( textToDisplayLarge, textToDisplaySmall, isDisplaySecondsShown, false );
 
-  } else if( timeClient.isTimeSet() ) {
-    time_t dt = timeClient.getEpochTime();
+  } else if( timeClient.isTimeSet() || isCustomDateTimeSet ) {
+    time_t dt = 0;
+    if( timeClient.isTimeSet() ) {
+      dt = timeClient.getEpochTime();
+    } else if( isCustomDateTimeSet ) {
+      unsigned long currentMillis = millis();
+      if( currentMillis >= customDateTimeReceivedAt && customDateTimePrevMillis < customDateTimeReceivedAt ) {
+        unsigned long wrappedSeconds = ULONG_MAX / 1000 + 1;
+        customDateTimeReceivedAt = customDateTimeReceivedAt - ( 1000 - ULONG_MAX % 1000 );
+        customDateTime = customDateTime + wrappedSeconds;
+      }
+      customDateTimePrevMillis = currentMillis;
+      unsigned long timeDiff = calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
+      dt = customDateTime + timeDiff / 1000;
+    }
+
     struct tm* dtStruct = localtime(&dt);
     uint8_t hour = dtStruct->tm_hour;
     hour += isWithinDstBoundaries( dt ) ? 3 : 2;
@@ -1404,7 +1423,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       "body{margin:0;background-color:#444;font-family:sans-serif;color:#FFF;}"
       "body,input,button{font-size:var(--f);}"
       ".wrp{width:60%;min-width:460px;max-width:600px;margin:auto;margin-bottom:10px;}"
-      "h2{color:#FFF;font-size:calc(var(--f)*1.2);text-align:center;margin-top:0.3em;margin-bottom:0.2em;}"
+      "h2{color:#FFF;font-size:calc(var(--f)*1.2);text-align:center;margin-top:0.3em;margin-bottom:0.1em;}"
       ".fx{display:flex;flex-wrap:wrap;margin:auto;}"
       ".fx:not(:first-of-type){margin-top:0.3em;}"
       ".fx .fi{display:flex;align-items:center;margin-top:0.3em;width:100%;}"
@@ -1440,10 +1459,11 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".stat>span:first-of-type{background-color:#666;}"
       ".stat>span:not(:last-of-type){border-right:1px solid #DDD;}"
       "#exw{width:100%;display:flex;background-image:linear-gradient(-180deg,#777,#222 7% 93%,#000);}"
-      "#exdw{width:76%;padding:2.3% 5.38%;aspect-ratio:32/8;}"
+      "#exdw{width:76%;border:2px solid #1A1A1A;padding:1px;margin:calc(2.3% - 3px) calc(5.38% - 3px);aspect-ratio:32/8;}"
       "#exdw .exdl{display:flex;flex-wrap:nowrap;}"
       "#exdw .exdp{width:calc(100%/32);aspect-ratio:1;}"
-      "#exdw .exdp.exdp1{background:radial-gradient(RGBA(16,192,0,1) 55%,RGBA(34,34,34,0) 65%);}"
+      "#exdw .exdp.exdp1{background:radial-gradient(RGBA(64,192,0,1) 55%,RGBA(34,34,34,0) 65%);}"
+      "#exdw .exdp.exdp0{background:radial-gradient(RGBA(44,44,44,1) 55%,RGBA(34,34,34,0) 65%);}"
       "#exlw,#exrw{width:24%;flex-wrap:wrap;align-items:center;justify-content:flex-end;display:none;}"
       "#exrw{justify-content:flex-start;}"
       "#exlw>div,#exrw>div{height:calc(75% - 2*0.2em);width:calc(75% - 2*0.2em);padding:0.2em;border-radius:50%;background:conic-gradient(from 0deg,#666,#EEE,#666,#999,#666,#EEE,#666,#999,#666);}"
@@ -1515,6 +1535,7 @@ const char* HTML_PAGE_ROOT_ENDPOINT = "/";
 const char* HTML_PAGE_TIMER_ENDPOINT = "/timer";
 const char* HTML_PAGE_PREVIEW_ENDPOINT = "/preview";
 const char* HTML_PAGE_DATA_ENDPOINT = "/data";
+const char* HTML_PAGE_SET_DATE_ENDPOINT = "/setdt";
 const char* HTML_PAGE_REBOOT_ENDPOINT = "/reboot";
 const char* HTML_PAGE_TESTLED_ENDPOINT = "/testled";
 const char* HTML_PAGE_TEST_NIGHT_ENDPOINT = "/testdim";
@@ -1572,7 +1593,7 @@ void handleWebServerGet() {
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
-    "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"><div><div></div></div></div></div></div>"
+    "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"" ) ) + ( isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + "><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"" + ( !isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + String( F("><div><div></div></div></div></div></div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
@@ -1607,6 +1628,12 @@ void handleWebServerGet() {
   "</div>"
 "</div>"
 "<script>"
+  "function dt(){"
+    "let ts=") ) + String( timeClient.isTimeSet() || ( isCustomDateTimeSet && calculateDiffMillis( customDateTimeReceivedAt, millis() ) <= DELAY_NTP_TIME_SYNC ) ) + String( F(";"
+    "if(ts)return;"
+    "fetch('/setdt?t='+Date.now().toString()).catch(e=>{"
+    "});"
+  "}"
   "function pw(){"
     "fetch('/preview?f='+document.querySelector('#fnt').value+'&b='+(document.querySelector('#bld').checked?'1':'0')+'&s='+(document.querySelector('#sec').checked?'1':'0')).then(res=>{"
       "return res.ok?res.json():[];"
@@ -1627,6 +1654,7 @@ void handleWebServerGet() {
     "document.querySelector('#exrw').style.display=rton?'':'flex';"
   "}"
   "document.addEventListener(\"DOMContentLoaded\",()=>{"
+    "dt();"
     "pw();"
   "});"
 "</script>") );
@@ -2127,6 +2155,22 @@ void handleWebServerGetData() {
   }
 }
 
+void handleWebServerSetDate() {
+  String dtStr = wifiWebServer.arg("t");
+  if( dtStr != "" ) {
+    char *strPtr;
+    unsigned long long dt = std::strtoull( dtStr.c_str(), &strPtr, 10 );
+    isCustomDateTimeSet = true;
+    unsigned long currentMillis = millis();
+    customDateTimeReceivedAt = currentMillis;
+    customDateTimePrevMillis = currentMillis;
+    customDateTime = dt / 1000;
+    wifiWebServer.send( 200, getContentType( F("json") ), "\"" + dtStr + "\"" );
+  } else {
+    wifiWebServer.send( 404, getContentType( F("txt") ), F("Error: 't' parameter not populated or not an epoch time with millis") );
+  }
+}
+
 void handleWebServerGetTestNight() {
   String content;
   addHtmlPageStart( content );
@@ -2243,6 +2287,7 @@ void configureWebServer() {
   wifiWebServer.on( HTML_PAGE_TIMER_ENDPOINT, HTTP_GET,  handleWebServerGetTimer );
   wifiWebServer.on( HTML_PAGE_PREVIEW_ENDPOINT, HTTP_GET, handleWebServerGetPreview );
   wifiWebServer.on( HTML_PAGE_DATA_ENDPOINT, HTTP_GET, handleWebServerGetData );
+  wifiWebServer.on( HTML_PAGE_SET_DATE_ENDPOINT, HTTP_GET, handleWebServerSetDate );
   wifiWebServer.on( HTML_PAGE_TEST_NIGHT_ENDPOINT, HTTP_GET, handleWebServerGetTestNight );
   wifiWebServer.on( HTML_PAGE_TESTLED_ENDPOINT, HTTP_GET, handleWebServerGetTestLeds );
   wifiWebServer.on( HTML_PAGE_REBOOT_ENDPOINT, HTTP_GET, handleWebServerGetReboot );
@@ -2342,8 +2387,13 @@ void loop() {
         previousMillisSemicolonAnimation = timerBlinkingStartTimeMillis;
         previousMillisDisplayAnimation = timerBlinkingStartTimeMillis;
         isForceDisplaySync = false;
-      } else if( timeClient.isTimeSet() ) {
-        unsigned long timeClientSecondsCurrent = timeClient.getEpochTime();
+      } else if( timeClient.isTimeSet() || isCustomDateTimeSet ) {
+        unsigned long timeClientSecondsCurrent = 0;
+        if( timeClient.isTimeSet() ) {
+          timeClientSecondsCurrent = timeClient.getEpochTime();
+        } else if( isCustomDateTimeSet ) {
+          timeClientSecondsCurrent = customDateTime + calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
+        }
         if( isSlowSemicolonAnimation ) {
           isSemicolonShown = timeClientSecondsCurrent % 2 == 0;
         } else { //else if 500 let it remain blank until the next second comes
