@@ -671,14 +671,16 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
 
   uint8_t displayWidthUsed = 0;
   std::map<String, std::vector<uint8_t>> font = TCFonts::getFont( displayFontTypeNumber );
+  bool isProgressBarShown = isTimerRunning ? isProgressIndicatorShown : false;
+
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isProgressBarShown, false );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isProgressBarShown, false );
     std::vector<uint8_t> charImagePrevious;
     if( isDisplayAnimationInProgress ) {
       bool isAnimatable = false;
@@ -690,7 +692,7 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
       if( isAnimatable && charToDisplayIndex < textToDisplayLargeAnimated.length() ) {
         char charToDisplayPrevious = textToDisplayLargeAnimated.charAt( charToDisplayIndex );
         if( charToDisplay != charToDisplayPrevious ) {
-          charImagePrevious = TCFonts::getSymbol( font, charToDisplayPrevious, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+          charImagePrevious = TCFonts::getSymbol( font, charToDisplayPrevious, isDisplayBoldFontUsed, !isSecondsShown, isProgressBarShown, false );
         }
       }
     }
@@ -744,12 +746,12 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
 
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplaySmall.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplaySmall.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    uint8_t charWidth = TCFonts::getSymbolWidth( displayFontTypeNumber, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isProgressBarShown, true );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isDisplayBoldFontUsed, !isSecondsShown, isProgressBarShown, true );
 
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
@@ -787,16 +789,17 @@ std::vector<std::vector<bool>> getDisplayPreview( uint8_t fontNumber, bool isBol
 
   uint8_t displayWidthUsed = 0;
   std::map<String, std::vector<uint8_t>> font = TCFonts::getFont( fontNumber );
+  bool isProgressBarShown = false; //isTimerRunning ? isProgressIndicatorShown : false;
 
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLarge.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLarge.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isProgressBarShown, false );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
 
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, false );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isProgressBarShown, false );
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
         bool isPointEnabled = false;
@@ -813,13 +816,13 @@ std::vector<std::vector<bool>> getDisplayPreview( uint8_t fontNumber, bool isBol
 
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplaySmall.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplaySmall.charAt( charToDisplayIndex );
-    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    uint8_t charWidth = TCFonts::getSymbolWidth( fontNumber, charToDisplay, isBold, !isSecondsShown, isProgressBarShown, true );
     if( displayWidthUsed + charWidth > DISPLAY_WIDTH ) {
       charWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
     if( charWidth == 0 ) continue;
 
-    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isTimerRunning ? isProgressIndicatorShown : false, true );
+    std::vector<uint8_t> charImage = TCFonts::getSymbol( font, charToDisplay, isBold, !isSecondsShown, isProgressBarShown, true );
     for( uint8_t displayY = 0; displayY < DISPLAY_HEIGHT; ++displayY ) {
       for( uint8_t charX = 0; charX < charWidth; ++charX ) {
         bool isPointEnabled = false;
