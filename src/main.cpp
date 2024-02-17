@@ -78,6 +78,7 @@ uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would
 uint8_t timerBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
 uint8_t timerLongBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
 uint8_t timerShortBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
+
 const bool IS_LOW_LEVEL_BUZZER = true;
 
 const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
@@ -1560,7 +1561,7 @@ const char* HTML_PAGE_TIMER_BEEPING_TIME_NAME = "tbe";
 const char* HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME = "tpi";
 const char* HTML_PAGE_TIMER_ANIMATED_NAME = "ta";
 
-const char* HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME = "sdh";
+const char* HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME = "sdh";
 const char* HTML_PAGE_CLOCK_ANIMATED_NAME = "ca";
 
 const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
@@ -1603,7 +1604,7 @@ void handleWebServerGet() {
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation, "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber, "" ) + String( F("</div>"
@@ -1740,7 +1741,7 @@ void handleWebServerPost() {
   }
 
 
-  String htmlPageTimerSetupResetTimeSecondsReceived = wifiWebServer.arg( HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME );
+  String htmlPageTimerSetupResetTimeSecondsReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME );
   uint timerSetupResetTimeSecondsReceived = htmlPageTimerSetupResetTimeSecondsReceived.toInt();
   bool timerSetupResetTimeSecondsReceivedPopulated = false;
   if( timerSetupResetTimeSecondsReceived >= 0 || timerSetupResetTimeSecondsReceived <= 255 ) {
@@ -1805,7 +1806,7 @@ void handleWebServerPost() {
   }
 
 
-  String htmlPageIsSingleDigitHourShownReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SHOW_SINGLE_DIGIT_HOUR_NAME );
+  String htmlPageIsSingleDigitHourShownReceived = wifiWebServer.arg( HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME );
   bool isSingleDigitHourShownReceived = false;
   bool isSingleDigitHourShownReceivedPopulated = false;
   if( htmlPageIsSingleDigitHourShownReceived == "on" ) {
