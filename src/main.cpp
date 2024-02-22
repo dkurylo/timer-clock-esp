@@ -78,7 +78,6 @@ uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would
 uint8_t timerBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
 uint8_t timerLongBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
 uint8_t timerShortBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
-
 const bool IS_LOW_LEVEL_BUZZER = true;
 
 const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
@@ -125,8 +124,10 @@ uint8_t animationTypeNumber = 0;
 
 //brightness settings
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 20;
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 10;
 const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 400;
+const double SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS = 0.12;
+const uint16_t SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS = 15000;
 
 //custom datetime settings (used when there is no internet connection)
 bool isCustomDateTimeSet = false;
@@ -535,8 +536,7 @@ bool isWithinDstBoundaries( time_t dt ) {
 double displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
 double displayPreviousBrightness = -1.0;
 double sensorBrightnessAverage = -1.0;
-//uint16_t DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS = 5000;
-//unsigned long previousDisplayBrightnessToleranceUpdatedMillis = millis();
+int brightnessDiffSustainedMillis = 0;
 
 void calculateDisplayBrightness() {
   uint16_t currentBrightness = analogRead(A0);
@@ -562,39 +562,32 @@ void setDisplayBrightness( uint8_t displayNewBrightness ) {
 }
 
 void setDisplayBrightness( bool isInit ) {
-  //unsigned long currentMillis = millis();
   bool updateDisplayBrightness = false;
   uint8_t displayCurrentBrightnessInt = static_cast<uint8_t>( round( displayCurrentBrightness ) );
   uint8_t displayPreviousBrightnessInt = static_cast<uint8_t>( round( displayPreviousBrightness ) );
 
   if( isInit || displayPreviousBrightness < 0 ) {
     updateDisplayBrightness = true;
+    brightnessDiffSustainedMillis = 0;
   } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
-    double hysteresis = 0.15;
-    if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + hysteresis ) ) ) ||
-        ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - hysteresis ) ) ) ) {
+    if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ||
+        ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ) {
       updateDisplayBrightness = true;
-    }
-  }
-
-  /*if( isInit ) {
-    updateDisplayBrightness = true;
-  } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
-    if( calculateDiffMillis( previousDisplayBrightnessToleranceUpdatedMillis, currentMillis ) < DELAY_DISPLAY_BRIGHTNESS_TOLERANCE_MILLIS ) {
-      uint8_t diffTolerance = 1;
-      uint8_t brightnessDiff = displayCurrentBrightnessInt > displayPreviousBrightnessInt ? displayCurrentBrightnessInt - displayPreviousBrightnessInt : displayPreviousBrightnessInt - displayCurrentBrightnessInt;
-      if( brightnessDiff > diffTolerance ) {
-        updateDisplayBrightness = true;
-      }
+      brightnessDiffSustainedMillis = 0;
     } else {
-      updateDisplayBrightness = true;
+      brightnessDiffSustainedMillis += DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK;
+      if( brightnessDiffSustainedMillis >= SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS ) {
+        updateDisplayBrightness = true;
+        brightnessDiffSustainedMillis = 0;
+      }
     }
-  }*/
+  } else {
+    brightnessDiffSustainedMillis = 0;
+  }
 
   if( updateDisplayBrightness ) {
     setDisplayBrightness( displayCurrentBrightnessInt );
     displayPreviousBrightness = displayCurrentBrightness;
-    //previousDisplayBrightnessToleranceUpdatedMillis = currentMillis;
   }
 }
 
