@@ -2312,10 +2312,6 @@ void handleWebServerRedirect() {
   wifiWebServer.sendHeader( F("Location"), String( F("http://") ) + WiFi.softAPIP().toString() );
   wifiWebServer.send( 302, getContentType( F("html") ), "" );
   wifiWebServer.client().stop();
-
-  if( isApInitialized ) { //this resets AP timeout when user loads the page in AP mode
-    apStartedMillis = millis();
-  }
 }
 
 bool isWebServerInitialized = false;
