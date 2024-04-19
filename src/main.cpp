@@ -1577,7 +1577,7 @@ const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
 const char* HTML_PAGE_BOLD_FONT_NAME = "bld";
 const char* HTML_PAGE_SHOW_SECS_NAME = "sec";
 const char* HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME = "ssa";
-const char* HTML_PAGE_ROTATE_DISPLAY_NAME = "rt";
+const char* HTML_PAGE_ROTATE_DISPLAY_NAME = "rot";
 const char* HTML_PAGE_ANIMATION_TYPE_NAME = "at";
 const char* HTML_PAGE_BRIGHTNESS_DAY_NAME = "brtd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_NAME = "brtn";
@@ -1610,12 +1610,12 @@ void handleWebServerGet() {
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
     "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"" ) ) + ( isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + "><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"" + ( !isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + String( F("><div><div></div></div></div></div></div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "onchange=\"pw();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pv();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pv();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pv();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "onchange=\"pv();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation, "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "onchange=\"pw();\"" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "onchange=\"rt();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber, "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness, "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness, "" ) + String( F("</div>"
@@ -1644,13 +1644,18 @@ void handleWebServerGet() {
   "</div>"
 "</div>"
 "<script>"
+  "function rt(){"
+    "let rton=document.querySelector('#") ) + HTML_PAGE_ROTATE_DISPLAY_NAME + String( F("').checked;"
+    "document.querySelector('#exlw').style.display=rton?'flex':'';"
+    "document.querySelector('#exrw').style.display=rton?'':'flex';"
+  "}"
   "function dt(){"
     "let ts=") ) + String( timeClient.isTimeSet() || ( isCustomDateTimeSet && calculateDiffMillis( customDateTimeReceivedAt, millis() ) <= DELAY_NTP_TIME_SYNC ) ) + String( F(";"
     "if(ts)return;"
     "fetch('/setdt?t='+Date.now().toString()).catch(e=>{"
     "});"
   "}"
-  "function pw(){"
+  "function pv(){"
     "fetch('/preview?f='+document.querySelector('#") ) + HTML_PAGE_FONT_TYPE_NAME + String( F("').value+'&b='+(document.querySelector('#") ) + HTML_PAGE_BOLD_FONT_NAME + String( F("').checked?'1':'0')+'&s='+(document.querySelector('#") ) + HTML_PAGE_SHOW_SECS_NAME + String( F("').checked?'1':'0')+'&z='+(document.querySelector('#") ) + HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME + String( F("').checked?'1':'0')).then(res=>{"
       "return res.ok?res.json():[];"
     "}).then(dt=>{"
@@ -1665,9 +1670,6 @@ void handleWebServerGet() {
       "})();"
     "}).catch(e=>{"
     "});"
-    "let rton=document.querySelector('#rt').checked;"
-    "document.querySelector('#exlw').style.display=rton?'flex':'';"
-    "document.querySelector('#exrw').style.display=rton?'':'flex';"
   "}"
   "function pg(){"
     "let ap=") ) + String( isApInitialized ) + String( F(";"
@@ -1678,8 +1680,9 @@ void handleWebServerGet() {
     "},60000);"
   "}"
   "document.addEventListener(\"DOMContentLoaded\",()=>{"
+    "rt();"
     "dt();"
-    "pw();"
+    "pv();"
     "pg();"
   "});"
 "</script>") );
