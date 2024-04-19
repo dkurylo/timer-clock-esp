@@ -778,6 +778,41 @@ void renderDisplayText( String textToDisplayLarge, String textToDisplaySmall, bo
   }
 }
 
+bool timeCanBeCalculated() {
+  return timeClient.isTimeSet() || isCustomDateTimeSet;
+}
+
+void calculateTimeToShow( String& hourStr, String& minuteStr, String& secondStr, bool isSingleDigitHourShownCurrently ) {
+  if( timeCanBeCalculated() ) {
+    time_t dt = 0;
+    if( timeClient.isTimeSet() ) {
+      dt = timeClient.getEpochTime();
+    } else if( isCustomDateTimeSet ) {
+      unsigned long currentMillis = millis();
+      if( currentMillis >= customDateTimeReceivedAt && customDateTimePrevMillis < customDateTimeReceivedAt ) {
+        unsigned long wrappedSeconds = ULONG_MAX / 1000 + 1;
+        customDateTimeReceivedAt = customDateTimeReceivedAt - ( 1000 - ULONG_MAX % 1000 );
+        customDateTime = customDateTime + wrappedSeconds;
+      }
+      customDateTimePrevMillis = currentMillis;
+      unsigned long timeDiff = calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
+      dt = customDateTime + timeDiff / 1000;
+    }
+
+    struct tm* dtStruct = localtime(&dt);
+    uint8_t hour = dtStruct->tm_hour;
+    hour += isWithinDstBoundaries( dt ) ? 3 : 2;
+    if( hour >= 24 ) {
+      hour = hour - 24;
+    }
+    hourStr = ( hour < 10 ? ( isSingleDigitHourShownCurrently ? " " : "0" ) : "" ) + String( hour );
+    uint8_t minute = dtStruct->tm_min;
+    minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
+    uint8_t second = dtStruct->tm_sec;
+    secondStr = ( second < 10 ? "0" : "" ) + String( second );
+  }
+}
+
 std::vector<std::vector<bool>> getDisplayPreview( uint8_t fontNumber, bool isBold, bool isSecondsShown, String textToDisplayLarge, String textToDisplaySmall ) {
   std::vector<std::vector<bool>> preview( DISPLAY_HEIGHT, std::vector<bool>( DISPLAY_WIDTH, false ) );
 
@@ -893,33 +928,9 @@ void renderDisplay() {
     String textToDisplaySmall = isTimerBlinkingShown ? ( isDisplaySecondsShown ? String( "00" ) : String( "" ) ) : ( isDisplaySecondsShown ? String( "  " ) : String( "" ) );
     renderDisplayText( textToDisplayLarge, textToDisplaySmall, isDisplaySecondsShown, false );
 
-  } else if( timeClient.isTimeSet() || isCustomDateTimeSet ) {
-    time_t dt = 0;
-    if( timeClient.isTimeSet() ) {
-      dt = timeClient.getEpochTime();
-    } else if( isCustomDateTimeSet ) {
-      unsigned long currentMillis = millis();
-      if( currentMillis >= customDateTimeReceivedAt && customDateTimePrevMillis < customDateTimeReceivedAt ) {
-        unsigned long wrappedSeconds = ULONG_MAX / 1000 + 1;
-        customDateTimeReceivedAt = customDateTimeReceivedAt - ( 1000 - ULONG_MAX % 1000 );
-        customDateTime = customDateTime + wrappedSeconds;
-      }
-      customDateTimePrevMillis = currentMillis;
-      unsigned long timeDiff = calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
-      dt = customDateTime + timeDiff / 1000;
-    }
-
-    struct tm* dtStruct = localtime(&dt);
-    uint8_t hour = dtStruct->tm_hour;
-    hour += isWithinDstBoundaries( dt ) ? 3 : 2;
-    if( hour >= 24 ) {
-      hour = hour - 24;
-    }
-    String hourStr = ( hour < 10 ? ( isSingleDigitHourShown ? " " : "0" ) : "" ) + String( hour );
-    uint8_t minute = dtStruct->tm_min;
-    String minuteStr = ( minute < 10 ? "0" : "" ) + String( minute );
-    uint8_t second = dtStruct->tm_sec;
-    String secondStr = ( second < 10 ? "0" : "" ) + String( second );
+  } else if( timeCanBeCalculated() ) {
+    String hourStr, minuteStr, secondStr;
+    calculateTimeToShow( hourStr, minuteStr, secondStr, isSingleDigitHourShown );
 
     String textToDisplayLarge = hourStr + ( isSemicolonShown ? ":" : "\t" ) + minuteStr;
     String textToDisplaySmall = isDisplaySecondsShown ? secondStr : String( "" );
@@ -1602,7 +1613,7 @@ void handleWebServerGet() {
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pw();\"" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation, "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "onchange=\"pw();\"" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, 2, false, animationTypeNumber, "" ) + String( F("</div>"
@@ -1640,7 +1651,7 @@ void handleWebServerGet() {
     "});"
   "}"
   "function pw(){"
-    "fetch('/preview?f='+document.querySelector('#fnt').value+'&b='+(document.querySelector('#bld').checked?'1':'0')+'&s='+(document.querySelector('#sec').checked?'1':'0')).then(res=>{"
+    "fetch('/preview?f='+document.querySelector('#") ) + HTML_PAGE_FONT_TYPE_NAME + String( F("').value+'&b='+(document.querySelector('#") ) + HTML_PAGE_BOLD_FONT_NAME + String( F("').checked?'1':'0')+'&s='+(document.querySelector('#") ) + HTML_PAGE_SHOW_SECS_NAME + String( F("').checked?'1':'0')+'&z='+(document.querySelector('#") ) + HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME + String( F("').checked?'1':'0')).then(res=>{"
       "return res.ok?res.json():[];"
     "}).then(dt=>{"
       "document.querySelector('#exdw').innerHTML=(()=>{"
@@ -2137,8 +2148,22 @@ void handleWebServerGetPreview() {
   bool isBold = isBoldStr == String( F("1") ) || isBoldStr == String( F("true") ) || isBoldStr == String( F("TRUE") ) || isBoldStr == String( F("True") );
   String isSecondsShownStr = wifiWebServer.arg("s");
   bool isSecondsShown = isSecondsShownStr == String( F("1") ) || isSecondsShownStr == String( F("true") ) || isSecondsShownStr == String( F("TRUE") ) || isSecondsShownStr == String( F("True") );
+  String isSingleDigitHourShownCurrentlyStr = wifiWebServer.arg("z");
+  bool isSingleDigitHourShownCurrently = isSingleDigitHourShownCurrentlyStr == String( F("1") ) || isSingleDigitHourShownCurrentlyStr == String( F("true") ) || isSingleDigitHourShownCurrentlyStr == String( F("TRUE") ) || isSingleDigitHourShownCurrentlyStr == String( F("True") );
 
-  std::vector<std::vector<bool>> preview = getDisplayPreview( fontNumber, isBold, isSecondsShown, "21:46", "37" );
+  String hourStr, minuteStr, secondStr;
+  if( timeCanBeCalculated() ) {
+    calculateTimeToShow( hourStr, minuteStr, secondStr, isSingleDigitHourShownCurrently );
+  } else {
+    hourStr = "21";
+    minuteStr = "46";
+    secondStr = "37";
+  }
+
+  String textToDisplayLarge = hourStr + ":" + minuteStr;
+  String textToDisplaySmall = secondStr;
+
+  std::vector<std::vector<bool>> preview = getDisplayPreview( fontNumber, isBold, isSecondsShown, textToDisplayLarge, textToDisplaySmall );
   String response = "";
   uint8_t lineNumber = 0;
   response += "[\n";
@@ -2441,7 +2466,7 @@ void loop() {
         previousMillisSemicolonAnimation = timerBlinkingStartTimeMillis;
         previousMillisDisplayAnimation = timerBlinkingStartTimeMillis;
         isForceDisplaySync = false;
-      } else if( timeClient.isTimeSet() || isCustomDateTimeSet ) {
+      } else if( timeCanBeCalculated() ) {
         unsigned long timeClientSecondsCurrent = 0;
         if( timeClient.isTimeSet() ) {
           timeClientSecondsCurrent = timeClient.getEpochTime();
