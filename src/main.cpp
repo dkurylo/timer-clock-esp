@@ -14,7 +14,7 @@
 
 #include <DNSServer.h> //for Captive Portal
 
-#include <NTPClient.h>
+#include <NTPClientMod.h>
 #include <WiFiUdp.h>
 #include <EEPROM.h>
 #include <LittleFS.h>
@@ -455,11 +455,20 @@ void initInternalLed() {
   setInternalLedStatus( internalLedStatus );
 }
 
+//display functions
+unsigned long timeClientSecondsAtDisplaySyncStart = 0;
+void forceDisplaySync() {
+  if( timeClient.isTimeSet() ) {
+    timeClientSecondsAtDisplaySyncStart = timeClient.getEpochTime();
+  }
+  isForceDisplaySync = true;
+  isForceDisplaySyncDisplayRenderOverride = true;
+}
+
 
 //time of day functionality
 bool isTimeClientInitialised = false;
 unsigned long timeClientUpdatedMillis = 0;
-bool timeClientTimeInitStatus = false;
 void initTimeClient() {
   if( WiFi.isConnected() && !isTimeClientInitialised ) {
     timeClient.setUpdateInterval( DELAY_NTP_TIME_SYNC );
@@ -470,23 +479,22 @@ void initTimeClient() {
   }
 }
 
-bool updateTimeClient( bool canWait ) {
+bool updateTimeClient() {
   if( !WiFi.isConnected() ) return false;
   if( !timeClient.isTimeSet() ) {
     if( !isTimeClientInitialised ) {
       initTimeClient();
     }
-    if( isTimeClientInitialised && !isCustomDateTimeSet ) {
+    if( isTimeClientInitialised /*&& !isCustomDateTimeSet*/ ) {
       Serial.print( F("Updating NTP time...") );
-      timeClient.update();
-      if( canWait ) {
-        timeClientUpdatedMillis = millis();
-        while( !timeClient.isTimeSet() && ( calculateDiffMillis( timeClientUpdatedMillis, millis() ) < TIMEOUT_NTP_CLIENT_CONNECT ) ) {
-          delay( 250 );
-          Serial.print( "." );
-        }
+      bool isTimeUpdated = timeClient.update();
+      if( isTimeUpdated && timeClient.isTimeSet() ) {
+        Serial.println( F(" done") );
+        forceDisplaySync();
       }
-      Serial.println( F(" done") );
+      if( !isTimeUpdated ) {
+        Serial.println( F(" error") );
+      }
       previousMillisTimeClientStatusCheck = millis();
     }
   }
@@ -1050,15 +1058,6 @@ void beeperProcessLoopTick() {
 
 
 //timer functions
-unsigned long timeClientSecondsAtDisplaySyncStart = 0;
-void forceDisplaySync() {
-  if( timeClient.isTimeSet() ) {
-    timeClientSecondsAtDisplaySyncStart = timeClient.getEpochTime();
-  }
-  isForceDisplaySync = true;
-  isForceDisplaySyncDisplayRenderOverride = true;
-}
-
 void startBlinking() {
   if( timerBlinkingTimeMinutes == 0 ) return;
   unsigned long currentMillis = millis();
@@ -2654,15 +2653,10 @@ void loop() {
 
   currentMillis = millis();
   if( isFirstLoopRun || forceNtpUpdate || ( calculateDiffMillis( previousMillisNtpUpdatedCheck, millis() ) >= DELAY_NTP_UPDATED_CHECK ) ) {
-    if( updateTimeClient( false ) ) {
+    if( updateTimeClient() ) {
       forceNtpUpdate = false;
     }
     previousMillisNtpUpdatedCheck = currentMillis;
-  }
-  bool timeClientInitStatusChanged = timeClientTimeInitStatus != timeClient.isTimeSet();
-  if( timeClientInitStatusChanged ) {
-    forceDisplaySync();
-    timeClientTimeInitStatus = timeClient.isTimeSet();
   }
 
   currentMillis = millis();
@@ -2690,7 +2684,7 @@ void loop() {
         } else { //else if 500 let it remain blank until the next second comes
           isSemicolonShown = false;
         }
-        if( timeClientInitStatusChanged || timeClientSecondsAtDisplaySyncStart != timeClientSecondsCurrent ) {
+        if( timeClientSecondsAtDisplaySyncStart != timeClientSecondsCurrent ) {
           if( !isSlowSemicolonAnimation ) {
             isSemicolonShown = true;
           }
