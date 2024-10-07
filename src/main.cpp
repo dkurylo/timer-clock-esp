@@ -36,6 +36,8 @@
 
 #define BEEPER_PIN 16
 
+#define BRIGHTNESS_INPUT_PIN A0
+
 bool isNewBoard = false;
 const char* getFirmwareVersion() { const char* result = "1.00"; return result; }
 
@@ -76,9 +78,9 @@ uint8_t timerSetupResetTimeSeconds = 30; //CONFIGURABLE amount of time IN SECOND
 uint8_t timerRememberLastInputTimeMinutes = 30; //CONFIGURABLE amount of time IN MINUTES during which timer will remember the last used time (to reuse it on single button click)
 uint8_t timerDeltaTurnSeconds = 60; //CONFIGURABLE amount IN SECONDS which would be added by default on turn
 uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would be added by default on press
-uint8_t timerBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
-uint8_t timerLongBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
-uint8_t timerShortBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
+uint8_t alarmBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
+uint8_t alarmBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
+uint8_t actionBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
 const bool IS_LOW_LEVEL_BUZZER = true;
 
 const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
@@ -91,7 +93,7 @@ uint32_t timerCurrentSetupInMillis = 0 * 60 * 1000; //this is the amount of time
 unsigned long timerCurrentStartedTimeMillis = 0 * 60 * 1000; //when timer started running
 bool isTimerRunning = false; //whether timer is running
 
-unsigned long timerSetupLastUpdateMillis = 0; //when setup action was last performed to determine when to return to clock mode after timeout when the user has not started the timer but entered the setting mode
+unsigned long alarmSetupLastUpdateMillis = 0; //when setup action was last performed to determine when to return to clock mode after timeout when the user has not started the timer but entered the setting mode
 bool isTimerSetupRunning = false; //whether timer setting is running
 
 uint16_t TIMER_BLINKING_DELAY = 1000; //how fast the display will blink when timer is completed
@@ -369,8 +371,8 @@ void loadEepromData() {
     readEepromIntValue( eepromTimerDeltaPressIndex, timerDeltaPressMinutes, true );
     readEepromIntValue( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds, true );
     if( timerDeltaTurnSeconds == 0 ) timerDeltaTurnSeconds = 60;
-    readEepromIntValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeMinutes, true );
-    readEepromIntValue( eepromTimerBeepingTimeIndex, timerLongBeepingTimeSeconds, true );
+    readEepromIntValue( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes, true );
+    readEepromIntValue( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds, true );
     readEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown, true );
     readEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown, true );
     readEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay, true );
@@ -396,8 +398,8 @@ void loadEepromData() {
     writeEepromIntValue( eepromTimerDeltaPressIndex, timerDeltaPressMinutes );
     if( timerDeltaTurnSeconds == 0 ) timerDeltaTurnSeconds = 60;
     writeEepromIntValue( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds );
-    writeEepromIntValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeMinutes );
-    writeEepromIntValue( eepromTimerBeepingTimeIndex, timerLongBeepingTimeSeconds );
+    writeEepromIntValue( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes );
+    writeEepromIntValue( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds );
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown );
     writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay );
@@ -547,7 +549,7 @@ bool isWithinDstBoundaries( time_t dt ) {
   time_t lastOctoberSunday_t = mktime(&lastOctoberSunday);
 
   // Check if the datetime is within the DST boundaries
-  return dt > lastMarchSunday_t && dt < lastOctoberSunday_t;
+  return lastMarchSunday_t <= dt && dt < lastOctoberSunday_t;
 }
 
 
@@ -558,7 +560,7 @@ double sensorBrightnessAverage = -1.0;
 int brightnessDiffSustainedMillis = 0;
 
 void calculateDisplayBrightness() {
-  uint16_t currentBrightness = analogRead(A0);
+  uint16_t currentBrightness = analogRead( BRIGHTNESS_INPUT_PIN );
   if( sensorBrightnessAverage < 0 ) {
     sensorBrightnessAverage = (double)currentBrightness;
   } else {
@@ -1116,7 +1118,7 @@ void initBeeper() {
 }
 
 void startLongBeep() {
-  if( timerLongBeepingTimeSeconds == 0 ) return;
+  if( alarmBeepingTimeSeconds == 0 ) return;
   isTimerLongBeeping = true;
   timerLongBeepingStartTimeMillis = millis();
   startBeeping();
@@ -1145,17 +1147,17 @@ void stopShortBeep() {
 }
 
 void beeperProcessLoopTick() {
-  if( isTimerShortBeeping && ( timerShortBeepingTimeMillis == 0 || calculateDiffMillis( timerShortBeepingStartTimeMillis, millis() ) >= ( timerShortBeepingTimeMillis ) ) ) {
+  if( isTimerShortBeeping && ( actionBeepingTimeMillis == 0 || calculateDiffMillis( timerShortBeepingStartTimeMillis, millis() ) >= ( actionBeepingTimeMillis ) ) ) {
     stopShortBeep();
   }
   if( isTimerLongBeeping ) {
     unsigned long timerIsBeepingForTime = calculateDiffMillis( timerLongBeepingStartTimeMillis, millis() );
-    if( timerLongBeepingTimeSeconds == 0 || timerIsBeepingForTime >= ( timerLongBeepingTimeSeconds * 1000 ) ) {
+    if( alarmBeepingTimeSeconds == 0 || timerIsBeepingForTime >= ( alarmBeepingTimeSeconds * 1000 ) ) {
       stopLongBeep();
     } else {
-      uint8_t timerFirstStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 8;
-      uint8_t timerSecondStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 4;
-      uint8_t timerThirdStageLongBeepingTimeSeconds = timerLongBeepingTimeSeconds / 2;
+      uint8_t timerFirstStageLongBeepingTimeSeconds = alarmBeepingTimeSeconds / 8;
+      uint8_t timerSecondStageLongBeepingTimeSeconds = alarmBeepingTimeSeconds / 4;
+      uint8_t timerThirdStageLongBeepingTimeSeconds = alarmBeepingTimeSeconds / 2;
       if( timerIsBeepingForTime < timerFirstStageLongBeepingTimeSeconds * 1000 ) {
         if( timerIsBeepingForTime % 1000 < 500 ) {
           startBeeping();
@@ -1188,7 +1190,7 @@ void beeperProcessLoopTick() {
 
 //timer functions
 void startBlinking() {
-  if( timerBlinkingTimeMinutes == 0 ) return;
+  if( alarmBlinkingTimeMinutes == 0 ) return;
   unsigned long currentMillis = millis();
   isTimerBlinking = true;
   timerBlinkingStartTimeMillis = currentMillis;
@@ -1208,13 +1210,13 @@ void stopBlinking() {
 void exitTimerSetupMode() {
   cancelDisplayAnimation();
   isTimerSetupRunning = false;
-  timerSetupLastUpdateMillis = 0;
+  alarmSetupLastUpdateMillis = 0;
 }
 
 void enterTimerSetupMode() {
   cancelDisplayAnimation();
   isTimerSetupRunning = true;
-  timerSetupLastUpdateMillis = millis();
+  alarmSetupLastUpdateMillis = millis();
 }
 
 bool startTimer() {
@@ -1384,15 +1386,15 @@ void timerTurnRight() {
 }
 
 void timerProcessLoopTick() {
-  if( isTimerBlinking && ( timerBlinkingTimeMinutes == 0 || calculateDiffMillis( timerBlinkingStartTimeMillis, millis() ) >= ( timerBlinkingTimeMinutes * 60 * 1000 ) ) ) {
+  if( isTimerBlinking && ( alarmBlinkingTimeMinutes == 0 || calculateDiffMillis( timerBlinkingStartTimeMillis, millis() ) >= ( alarmBlinkingTimeMinutes * 60 * 1000 ) ) ) {
     cancelDisplayAnimation();
     stopBlinking();
   }
   if( !isTimerRunning ) {
-    if( isTimerSetupRunning && calculateDiffMillis( timerSetupLastUpdateMillis, millis() ) >= ( timerSetupResetTimeSeconds * 1000 ) ) {
+    if( isTimerSetupRunning && calculateDiffMillis( alarmSetupLastUpdateMillis, millis() ) >= ( timerSetupResetTimeSeconds * 1000 ) ) {
       cancelDisplayAnimation();
       isTimerSetupRunning = false;
-      timerSetupLastUpdateMillis = 0;
+      alarmSetupLastUpdateMillis = 0;
       timerCurrentSetupInMillis = 0;
     }
   } else {
@@ -1574,7 +1576,7 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
     "<style>"
       ":root{--f:22px;}"
       "body{margin:0;background-color:#444;font-family:sans-serif;color:#FFF;}"
-      "body,input,button{font-size:var(--f);}"
+      "body,input,button,select{font-size:var(--f);}"
       ".wrp{width:60%;min-width:460px;max-width:600px;margin:auto;margin-bottom:10px;}"
       "h2{color:#FFF;font-size:calc(var(--f)*1.2);text-align:center;margin-top:0.3em;margin-bottom:0.1em;}"
       ".fx{display:flex;flex-wrap:wrap;margin:auto;}"
@@ -1587,7 +1589,8 @@ const char HTML_PAGE_START[] PROGMEM = "<!DOCTYPE html>"
       ".ex.exc{height:0;margin-top:0;}.ex.exc>*{visibility:hidden;}"
       ".ex.exc.exon{height:inherit;}.ex.exc.exon>*{visibility:initial;}"
       "label{flex:none;padding-right:0.6em;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
-      "input{width:100%;padding:0.1em 0.2em;}"
+      "input,select{width:100%;padding:0.1em 0.2em;}"
+      "select.mid{text-align:center;}"
       "input[type=\"radio\"],input[type=\"checkbox\"]{flex:none;margin:0.1em 0;width:calc(var(--f)*1.2);height:calc(var(--f)*1.2);}"
       "input[type=\"radio\"]+label,input[type=\"checkbox\"]+label{padding-left:0.6em;padding-right:initial;flex:1 1 auto;max-width:initial;}"
       "input[type=\"range\"]{-webkit-appearance:none;background:transparent;padding:0;}"
@@ -1693,12 +1696,12 @@ const uint8_t getWiFiClientSsidPasswordMaxLength() { return WIFI_PASSWORD_MAX_LE
 const char* HTML_PAGE_WIFI_SSID_NAME = "ssid";
 const char* HTML_PAGE_WIFI_PWD_NAME = "pwd";
 
-const char* HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME = "tsr";
+const char* HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME = "tsr";
 const char* HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME = "tre";
 const char* HTML_PAGE_TIMER_PRESS_AMOUNT_NAME = "tpr";
 const char* HTML_PAGE_TIMER_TURN_AMOUNT_NAME = "ttu";
-const char* HTML_PAGE_TIMER_BLINKING_TIME_NAME = "tbl";
-const char* HTML_PAGE_TIMER_BEEPING_TIME_NAME = "tbe";
+const char* HTML_PAGE_ALARM_BLINKING_TIME_NAME = "tbl";
+const char* HTML_PAGE_ALARM_BEEPING_TIME_NAME = "tbe";
 const char* HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME = "tpi";
 const char* HTML_PAGE_TIMER_ANIMATED_NAME = "ta";
 
@@ -1734,12 +1737,12 @@ void handleWebServerGet() {
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування таймера:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds, "", "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes, "", "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes, "", "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(timerBlinkingTimeMinutes).c_str(), HTML_PAGE_TIMER_BLINKING_TIME_NAME, HTML_PAGE_TIMER_BLINKING_TIME_NAME, 0, 240, false, timerBlinkingTimeMinutes, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(timerLongBeepingTimeSeconds).c_str(), HTML_PAGE_TIMER_BEEPING_TIME_NAME, HTML_PAGE_TIMER_BEEPING_TIME_NAME, 0, 240, false, timerLongBeepingTimeSeconds, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(alarmBlinkingTimeMinutes).c_str(), HTML_PAGE_ALARM_BLINKING_TIME_NAME, HTML_PAGE_ALARM_BLINKING_TIME_NAME, 0, 240, false, alarmBlinkingTimeMinutes, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(alarmBeepingTimeSeconds).c_str(), HTML_PAGE_ALARM_BEEPING_TIME_NAME, HTML_PAGE_ALARM_BEEPING_TIME_NAME, 0, 240, false, alarmBeepingTimeSeconds, "", "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown, "", "" ) + String( F("</div>"
     "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, false, isTimerAnimated, "", "" ) + String( F("</div>"
   "</div>"
@@ -1902,22 +1905,6 @@ void handleWebServerPost() {
   String htmlPageSsidNameReceived = wifiWebServer.arg( HTML_PAGE_WIFI_SSID_NAME );
   String htmlPageSsidPasswordReceived = wifiWebServer.arg( HTML_PAGE_WIFI_PWD_NAME );
 
-  if( htmlPageSsidNameReceived.length() == 0 ) {
-    addHtmlPageStart( content );
-    content += String( F("<h2>Error: Missing SSID Name</h2>") );
-    addHtmlPageEnd( content );
-    wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, getContentType( F("html") ), content );
-    return;
-  }
-  if( htmlPageSsidPasswordReceived.length() == 0 ) {
-    addHtmlPageStart( content );
-    content += String( F("<h2>Error: Missing SSID Password</h2>") );
-    addHtmlPageEnd( content );
-    wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
-    wifiWebServer.send( 400, getContentType( F("html") ), content );
-    return;
-  }
   if( htmlPageSsidNameReceived.length() > getWiFiClientSsidNameMaxLength() ) {
     addHtmlPageStart( content );
     content += String( F("<h2>Error: SSID Name exceeds maximum length of ") ) + String( getWiFiClientSsidNameMaxLength() ) + String( F("</h2>") );
@@ -1936,45 +1923,45 @@ void handleWebServerPost() {
   }
 
 
-  String htmlPageTimerSetupResetTimeSecondsReceived = wifiWebServer.arg( HTML_PAGE_TIMER_SETUP_RESET_TIME_NAME );
+  String htmlPageTimerSetupResetTimeSecondsReceived = wifiWebServer.arg( HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME );
   uint timerSetupResetTimeSecondsReceived = htmlPageTimerSetupResetTimeSecondsReceived.toInt();
   bool timerSetupResetTimeSecondsReceivedPopulated = false;
-  if( timerSetupResetTimeSecondsReceived >= 0 || timerSetupResetTimeSecondsReceived <= 255 ) {
+  if( timerSetupResetTimeSecondsReceived >= 0 && timerSetupResetTimeSecondsReceived <= 255 ) {
     timerSetupResetTimeSecondsReceivedPopulated = true;
   }
 
   String htmlPageTimerRememberLastInputTimeReceived = wifiWebServer.arg( HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME );
   uint timerRememberLastInputTimeReceived = htmlPageTimerRememberLastInputTimeReceived.toInt();
   bool timerRememberLastInputTimeReceivedPopulated = false;
-  if( timerRememberLastInputTimeReceived >= 0 || timerRememberLastInputTimeReceived <= 255 ) {
+  if( timerRememberLastInputTimeReceived >= 0 && timerRememberLastInputTimeReceived <= 255 ) {
     timerRememberLastInputTimeReceivedPopulated = true;
   }
 
   String htmlPageTimerDeltaPressReceived = wifiWebServer.arg( HTML_PAGE_TIMER_PRESS_AMOUNT_NAME );
   uint timerDeltaPressReceived = htmlPageTimerDeltaPressReceived.toInt();
   bool timerDeltaPressReceivedPopulated = false;
-  if( timerDeltaPressReceived >= 0 || timerDeltaPressReceived <= 255 ) {
+  if( timerDeltaPressReceived >= 0 && timerDeltaPressReceived <= 255 ) {
     timerDeltaPressReceivedPopulated = true;
   }
 
   String htmlPageTimerDeltaTurnReceived = wifiWebServer.arg( HTML_PAGE_TIMER_TURN_AMOUNT_NAME );
   uint timerDeltaTurnReceived = htmlPageTimerDeltaTurnReceived.toInt();
   bool timerDeltaTurnReceivedPopulated = false;
-  if( timerDeltaTurnReceived > 0 || timerDeltaTurnReceived <= 255 ) {
+  if( timerDeltaTurnReceived > 0 && timerDeltaTurnReceived <= 255 ) {
     timerDeltaTurnReceivedPopulated = true;
   }
 
-  String htmlPageTimerBlinkingTimeReceived = wifiWebServer.arg( HTML_PAGE_TIMER_BLINKING_TIME_NAME );
+  String htmlPageTimerBlinkingTimeReceived = wifiWebServer.arg( HTML_PAGE_ALARM_BLINKING_TIME_NAME );
   uint timerBlinkingTimeReceived = htmlPageTimerBlinkingTimeReceived.toInt();
   bool timerBlinkingTimeReceivedPopulated = false;
-  if( timerBlinkingTimeReceived >= 0 || timerBlinkingTimeReceived <= 255 ) {
+  if( timerBlinkingTimeReceived >= 0 && timerBlinkingTimeReceived <= 255 ) {
     timerBlinkingTimeReceivedPopulated = true;
   }
 
-  String htmlPageTimerBeepingTimeReceived = wifiWebServer.arg( HTML_PAGE_TIMER_BEEPING_TIME_NAME );
+  String htmlPageTimerBeepingTimeReceived = wifiWebServer.arg( HTML_PAGE_ALARM_BEEPING_TIME_NAME );
   uint timerBeepingTimeReceived = htmlPageTimerBeepingTimeReceived.toInt();
   bool timerBeepingTimeReceivedPopulated = false;
-  if( timerBeepingTimeReceived >= 0 || timerBeepingTimeReceived <= 255 ) {
+  if( timerBeepingTimeReceived >= 0 && timerBeepingTimeReceived <= 255 ) {
     timerBeepingTimeReceivedPopulated = true;
   }
 
@@ -2096,14 +2083,14 @@ void handleWebServerPost() {
   String htmlPageDisplayDayModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_NAME );
   uint displayDayModeBrightnessReceived = htmlPageDisplayDayModeBrightnessReceived.toInt();
   bool displayDayModeBrightnessReceivedPopulated = false;
-  if( displayDayModeBrightnessReceived > 0 || displayDayModeBrightnessReceived <= 15 ) {
+  if( displayDayModeBrightnessReceived >= 0 && displayDayModeBrightnessReceived <= 15 ) {
     displayDayModeBrightnessReceivedPopulated = true;
   }
 
   String htmlPageDisplayNightModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_NIGHT_NAME );
   uint displayNightModeBrightnessReceived = htmlPageDisplayNightModeBrightnessReceived.toInt();
   bool displayNightModeBrightnessReceivedPopulated = false;
-  if( displayNightModeBrightnessReceived > 0 || displayNightModeBrightnessReceived <= 15 ) {
+  if( displayNightModeBrightnessReceived >= 0 && displayNightModeBrightnessReceived <= 15 ) {
     displayNightModeBrightnessReceivedPopulated = true;
     if( displayNightModeBrightnessReceived > displayDayModeBrightnessReceived ) {
       displayNightModeBrightnessReceived = displayDayModeBrightnessReceived;
@@ -2143,14 +2130,14 @@ void handleWebServerPost() {
     writeEepromIntValue( eepromTimerDeltaTurnIndex, timerDeltaTurnReceived );
   }
 
-  if( timerBlinkingTimeReceivedPopulated && timerBlinkingTimeReceived != timerBlinkingTimeMinutes ) {
-    timerBlinkingTimeMinutes = timerBlinkingTimeReceived;
+  if( timerBlinkingTimeReceivedPopulated && timerBlinkingTimeReceived != alarmBlinkingTimeMinutes ) {
+    alarmBlinkingTimeMinutes = timerBlinkingTimeReceived;
     Serial.println( F("Timer blinking time updated") );
     writeEepromIntValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeReceived );
   }
 
-  if( timerBeepingTimeReceivedPopulated && timerBeepingTimeReceived != timerLongBeepingTimeSeconds ) {
-    timerLongBeepingTimeSeconds = timerBeepingTimeReceived;
+  if( timerBeepingTimeReceivedPopulated && timerBeepingTimeReceived != alarmBeepingTimeSeconds ) {
+    alarmBeepingTimeSeconds = timerBeepingTimeReceived;
     Serial.println( F("Timer beeping time updated") );
     writeEepromIntValue( eepromTimerBeepingTimeIndex, timerBeepingTimeReceived );
   }
@@ -2640,7 +2627,7 @@ void handleWebServerGetMonitor() {
       "\"host\":\"") ) + getFullWiFiHostName() + String( F("\""
     "},"
     "\"brt\":{"
-      "\"cur\":") ) + String( analogRead(A0) ) + String( F(","
+      "\"cur\":") ) + String( analogRead( BRIGHTNESS_INPUT_PIN ) ) + String( F(","
       "\"avg\":") ) + String( sensorBrightnessAverage ) + String( F(","
       "\"req\":") ) + String( displayCurrentBrightness ) + String( F(","
       "\"dsp\":") ) + String( static_cast<uint8_t>( round( displayPreviousBrightness ) ) ) + String( F(""
@@ -2648,6 +2635,9 @@ void handleWebServerGetMonitor() {
     "\"ram\":{"
       "\"heap\":\"") ) + String( ESP.getFreeHeap() ) + String( F("\","
       "\"frag\":\"") ) + String( ESP.getHeapFragmentation() ) + String( F("\""
+    "},"
+    "\"cpu\":{"
+      "\"freq\":\"") ) + String( ESP.getCpuFreqMHz() ) + String( F("\""
     "}"
   "}" ) );
   wifiWebServer.send( 200, getContentType( F("json") ), content );
