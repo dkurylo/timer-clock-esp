@@ -66,8 +66,6 @@ const uint16_t DELAY_INTERNAL_LED_ANIMATION_LOW = 59800;
 const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
 
 //time settings
-const uint16_t TIMEOUT_NTP_CLIENT_CONNECT = 2500;
-const uint16_t DELAY_NTP_STATUS_CHECK = 10000;
 const uint32_t DELAY_NTP_TIME_SYNC = 6 * 60 * 60 * 1000; //sync time every 6 hours
 const uint32_t DELAY_NTP_TIME_SYNC_RETRY = 2 * 60 * 60 * 1000; //sync time every 2 hours if regular sync fails
 bool isSlowSemicolonAnimation = false; //semicolon period, false = 60 blinks per minute; true = 30 blinks per minute
@@ -138,7 +136,7 @@ const uint16_t SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS = 15
 bool isCustomDateTimeSet = false;
 unsigned long customDateTimeReceivedAt = 0;
 unsigned long customDateTimePrevMillis = 0;
-unsigned long customDateTime = 0;
+unsigned long customDateTimeReceivedSeconds = 0;
 
 #ifdef ESP8266
 ESP8266WebServer wifiWebServer(80);
@@ -161,12 +159,9 @@ bool isFirstLoopRun = true;
 unsigned long previousMillisDisplayAnimation = millis();
 unsigned long previousMillisSemicolonAnimation = millis();
 unsigned long previousMillisInternalLed = millis();
-unsigned long previousMillisNtpUpdated = millis();
 unsigned long previousMillisWiFiStatusCheck = millis();
 unsigned long previousMillisNtpStatusCheck = millis();
 unsigned long previousMillisSensorBrightnessCheck = millis();
-
-bool forceNtpUpdate = false;
 
 void initVariables() {
   isFirstLoopRun = true;
@@ -174,7 +169,6 @@ void initVariables() {
   previousMillisDisplayAnimation = currentMillis;
   previousMillisSemicolonAnimation = currentMillis;
   previousMillisInternalLed = currentMillis;
-  previousMillisNtpUpdated = currentMillis;
   previousMillisWiFiStatusCheck = currentMillis;
   previousMillisNtpStatusCheck = currentMillis;
   previousMillisSensorBrightnessCheck = currentMillis;
@@ -463,11 +457,7 @@ void initInternalLed() {
 }
 
 //display functions
-unsigned long timeClientSecondsAtDisplaySyncStart = 0;
 void forceDisplaySync() {
-  if( timeClient.isTimeSet() ) {
-    timeClientSecondsAtDisplaySyncStart = timeClient.getEpochTime();
-  }
   isForceDisplaySync = true;
   isForceDisplaySyncDisplayRenderOverride = true;
 }
@@ -486,31 +476,30 @@ void initTimeClient() {
   }
 }
 
-bool updateTimeClient() {
-  if( !WiFi.isConnected() ) return false;
+void ntpProcessLoopTick() {
+  if( !WiFi.isConnected() ) return;
   if( !isTimeClientInitialised ) {
     initTimeClient();
   }
   if( isTimeClientInitialised ) {
-    if( !timeClient.isTimeSet() || calculateDiffMillis( previousMillisNtpUpdated, millis() ) >= DELAY_NTP_TIME_SYNC ) {
-      Serial.print( F("Updating NTP time...") );
-      bool isTimeUpdated = timeClient.update();
-      if( isTimeUpdated && timeClient.isTimeSet() ) {
-        Serial.println( F(" done") );
-        previousMillisNtpUpdated = millis();
+    unsigned long currentMillis = millis();
+    if( calculateDiffMillis( previousMillisNtpStatusCheck, currentMillis ) >= 10 ) {
+      NTPClient::Status ntpStatus = timeClient.update();
+
+      if( ntpStatus == NTPClient::STATUS_SUCCESS_RESPONSE ) {
+        timeClient.setUpdateInterval( DELAY_NTP_TIME_SYNC );
+        Serial.println( "NTP time sync completed" );
         if( isCustomDateTimeSet ) {
           isCustomDateTimeSet = false;
         }
         forceDisplaySync();
-      } else {
-        Serial.println( F(" error") );
-        if( timeClient.isTimeSet() ) { //when time was initially set but during NTP update it fails to retrieve current time
-          previousMillisNtpUpdated += DELAY_NTP_TIME_SYNC_RETRY; //retry again but with smaller delay
-        }
+      } else if( ntpStatus == NTPClient::STATUS_FAILED_RESPONSE ) {
+        timeClient.setUpdateInterval( DELAY_NTP_TIME_SYNC_RETRY );
+        Serial.println( "NTP time sync error" );
       }
+      previousMillisNtpStatusCheck = currentMillis;
     }
   }
-  return true;
 }
 
 bool isWithinDstBoundaries( time_t dt ) {
@@ -904,11 +893,11 @@ void calculateTimeToShow( String& hourStr, String& minuteStr, String& secondStr,
       if( currentMillis >= customDateTimeReceivedAt && customDateTimePrevMillis < customDateTimeReceivedAt ) {
         unsigned long wrappedSeconds = ULONG_MAX / 1000 + 1;
         customDateTimeReceivedAt = customDateTimeReceivedAt - ( 1000 - ULONG_MAX % 1000 );
-        customDateTime = customDateTime + wrappedSeconds;
+        customDateTimeReceivedSeconds = customDateTimeReceivedSeconds + wrappedSeconds;
       }
       customDateTimePrevMillis = currentMillis;
       unsigned long timeDiff = calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
-      dt = customDateTime + timeDiff / 1000;
+      dt = customDateTimeReceivedSeconds + timeDiff / 1000;
     }
 
     struct tm* dtStruct = localtime(&dt);
@@ -2498,9 +2487,9 @@ void handleWebServerSetDate() {
     unsigned long long dt = std::strtoull( dtStr.c_str(), &strPtr, 10 );
     isCustomDateTimeSet = true;
     unsigned long currentMillis = millis();
-    customDateTimeReceivedAt = currentMillis;
-    customDateTimePrevMillis = currentMillis;
-    customDateTime = dt / 1000;
+    customDateTimeReceivedSeconds = dt / 1000;
+    customDateTimeReceivedAt = currentMillis - ( dt % 1000 ); //align with second start
+    customDateTimePrevMillis = currentMillis - ( dt % 1000 ); //align with second start
     wifiWebServer.send( 200, getContentType( F("json") ), "\"" + dtStr + "\"" );
   } else {
     wifiWebServer.send( 404, getContentType( F("txt") ), F("Error: 't' parameter not populated or not an epoch time with millis") );
@@ -2705,7 +2694,6 @@ void configureWebServer() {
 WiFiEventHandler wiFiEventHandler;
 void onWiFiConnected( const WiFiEventStationModeConnected& event ) {
   Serial.println( String( F("WiFi is connected to '") + String( event.ssid ) ) + String ( F("'") ) );
-  forceNtpUpdate = true;
 }
 
 void setup() {
@@ -2772,49 +2760,30 @@ void loop() {
     previousMillisWiFiStatusCheck = currentMillis;
   }
 
-  currentMillis = millis();
-  if( isFirstLoopRun || forceNtpUpdate || ( calculateDiffMillis( previousMillisNtpStatusCheck, millis() ) >= DELAY_NTP_STATUS_CHECK ) ) {
-    if( updateTimeClient() ) {
-      forceNtpUpdate = false;
-    }
-    previousMillisNtpStatusCheck = currentMillis;
-  }
+  ntpProcessLoopTick();
 
   currentMillis = millis();
   if( isFirstLoopRun || isForceDisplaySync || ( calculateDiffMillis( previousMillisDisplayAnimation, currentMillis ) >= DELAY_DISPLAY_ANIMATION ) ) {
     bool doRenderDisplay = true;
     if( isForceDisplaySync ) {
-      if( isTimerRunning ) {
-        previousMillisSemicolonAnimation = timerCurrentStartedTimeMillis;
-        previousMillisDisplayAnimation = timerCurrentStartedTimeMillis;
-        isForceDisplaySync = false;
-      } else if( isTimerBlinking ) {
-        isSemicolonShown = false;
-        previousMillisSemicolonAnimation = timerBlinkingStartTimeMillis;
-        previousMillisDisplayAnimation = timerBlinkingStartTimeMillis;
-        isForceDisplaySync = false;
-      } else if( timeCanBeCalculated() ) {
+      if( timeCanBeCalculated() ) {
         unsigned long timeClientSecondsCurrent = 0;
+        int timeClientSubSecondsCurrent = 0;
         if( timeClient.isTimeSet() ) {
           timeClientSecondsCurrent = timeClient.getEpochTime();
+          timeClientSubSecondsCurrent = timeClient.getSubSeconds();
         } else if( isCustomDateTimeSet ) {
-          timeClientSecondsCurrent = customDateTime + calculateDiffMillis( customDateTimeReceivedAt, currentMillis );
+          timeClientSecondsCurrent = customDateTimeReceivedSeconds + calculateDiffMillis( customDateTimeReceivedAt, currentMillis ) / 1000;
+          timeClientSubSecondsCurrent = calculateDiffMillis( customDateTimeReceivedAt, currentMillis ) % 1000;
         }
-        if( isSlowSemicolonAnimation ) {
-          isSemicolonShown = timeClientSecondsCurrent % 2 == 0;
-        } else { //else if 500 let it remain blank until the next second comes
-          isSemicolonShown = false;
-        }
-        if( timeClientSecondsAtDisplaySyncStart != timeClientSecondsCurrent ) {
-          if( !isSlowSemicolonAnimation ) {
-            isSemicolonShown = true;
-          }
-          previousMillisSemicolonAnimation = currentMillis;
-          previousMillisDisplayAnimation = currentMillis;
-          isForceDisplaySync = false;
-        } else {
+        bool shouldSemicolonBeShown = isSlowSemicolonAnimation ? ( timeClientSecondsCurrent % 2 == 0 ) : ( timeClientSubSecondsCurrent < 500 );
+        if( isSemicolonShown == shouldSemicolonBeShown ) {
           doRenderDisplay = false;
         }
+        isSemicolonShown = shouldSemicolonBeShown;
+        previousMillisSemicolonAnimation = currentMillis - ( isSlowSemicolonAnimation ? ( timeClientSubSecondsCurrent % 1000 ) : ( timeClientSubSecondsCurrent % 500 ) );
+        previousMillisDisplayAnimation = currentMillis - timeClientSubSecondsCurrent % DELAY_DISPLAY_ANIMATION;
+        isForceDisplaySync = false;
       } else {
         isSemicolonShown = !isSemicolonShown;
         previousMillisSemicolonAnimation = currentMillis;
