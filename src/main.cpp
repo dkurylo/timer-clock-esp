@@ -9,7 +9,7 @@
 #else //ESP32 or ESP32S2
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPUpdateServer.h>
+#include <HTTPUpdateServerMod.h>
 #endif
 
 #include <DNSServer.h> //for Captive Portal
@@ -26,17 +26,38 @@
 
 #define MAX_HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_MAX_DEVICES 4
-//#define MAX_DATA_PIN 0 //if using HW SPI then it's automatically MOSI 13
-//#define MAX_CLK_PIN 5 //if using HW SPI then it's automatically SCK 14
-#define MAX_CS_PIN 15 //if using HW SPI then it's SS 15 (not automatically)
 
+#ifdef ESP8266
+//#define MAX_DATA_PIN 0 //if using HW SPI then it's automatically MOSI 13 on ESP8266
+//#define MAX_CLK_PIN 5 //if using HW SPI then it's automatically SCK 14 on ESP8266
+#define MAX_CS_PIN 15 //if using HW SPI then it's SS 15 on ESP8266 (not automatically)
+#else //ESP32 or ESP32S2
+//#define MAX_DATA_PIN MOSI //if using HW SPI then it's automatically MOSI 11 on ESP32-S2
+//#define MAX_CLK_PIN SCK //if using HW SPI then it's automatically SCK 7 on ESP32-S2
+#define MAX_CS_PIN SS //if using HW SPI then it's SS 12 on ESP32-S2 (not automatically)
+#endif
+
+#ifdef ESP8266
 #define ENCODER_TURN_LEFT_PIN 4
 #define ENCODER_TURN_RIGHT_PIN 5
 #define ENCODER_BUTTON_PIN 0
+#else //ESP32 or ESP32S2
+#define ENCODER_TURN_LEFT_PIN 35
+#define ENCODER_TURN_RIGHT_PIN 37
+#define ENCODER_BUTTON_PIN 39
+#endif
 
+#ifdef ESP8266
 #define BEEPER_PIN 16
+#else //ESP32 or ESP32S2
+#define BEEPER_PIN 5
+#endif
 
+#ifdef ESP8266
 #define BRIGHTNESS_INPUT_PIN A0
+#else //ESP32 or ESP32S2
+#define BRIGHTNESS_INPUT_PIN 3
+#endif
 
 bool isNewBoard = false;
 const char* getFirmwareVersion() { const char* result = "1.00"; return result; }
@@ -61,6 +82,7 @@ const bool INVERT_INTERNAL_LED = true;
 #else //ESP32 or ESP32S2
 const bool INVERT_INTERNAL_LED = false;
 #endif
+
 const bool INTERNAL_LED_IS_USED = false;
 const uint16_t DELAY_INTERNAL_LED_ANIMATION_LOW = 59800;
 const uint16_t DELAY_INTERNAL_LED_ANIMATION_HIGH = 200;
@@ -79,7 +101,12 @@ uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would
 uint8_t alarmBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
 uint8_t alarmBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
 uint8_t actionBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
+
+#ifdef ESP8266
 const bool IS_LOW_LEVEL_BUZZER = true;
+#else //ESP32 or ESP32S2
+const bool IS_LOW_LEVEL_BUZZER = false;
+#endif
 
 const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
 
@@ -126,9 +153,15 @@ uint8_t animationTypeNumber = 0;
 uint8_t NUMBER_OF_ANIMATIONS_SUPPORTED = 5;
 
 //brightness settings
+#ifdef ESP8266
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 10; //ESP8266 has 10-bit ADC (0-1023)
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 350; //ESP8266 has 10-bit ADC (0-1023)
+#else //ESP32 or ESP32S2
+const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 80; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
+const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 2800; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
+#endif
+
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 10;
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 400;
 const double SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS = 0.12;
 const uint16_t SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS = 15000;
 
@@ -418,7 +451,12 @@ void createAccessPoint() {
   apStartedMillis = millis();
   Serial.print( F("Creating WiFi AP...") );
   WiFi.softAPConfig( getWiFiAccessPointIp(), getWiFiAccessPointIp(), getWiFiAccessPointNetMask() );
+  #ifdef ESP8266
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + String( ESP.getChipId() ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
+  #else //ESP32 or ESP32S2
+  String macAddress = String( ESP.getEfuseMac() );
+  WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + macAddress.substring( macAddress.length() - 4 ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
+  #endif
   IPAddress accessPointIp = WiFi.softAPIP();
   dnsServer.start( 53, "*", accessPointIp );
   Serial.println( String( F(" done | IP: ") ) + accessPointIp.toString() );
@@ -1460,8 +1498,10 @@ const String getWiFiStatusText( wl_status_t status ) {
       return F("CONNECT_FAILED");
     case WL_CONNECTION_LOST:
       return F("CONNECTION_LOST");
+    #ifdef ESP8266
     case WL_WRONG_PASSWORD:
       return F("WRONG_PASSWORD");
+    #endif
     case WL_DISCONNECTED:
       return F("DISCONNECTED");
     default:
@@ -1493,7 +1533,12 @@ bool isRouterSsidProvided() {
 }
 
 String getFullWiFiHostName() {
+  #ifdef ESP8266
   return String( getWiFiHostName() ) + "-" + String( ESP.getChipId() );
+  #else //ESP32 or ESP32S2
+  String macAddress = String( ESP.getEfuseMac() );
+  return String( getWiFiHostName() ) + "-" + macAddress.substring( macAddress.length() - 4 );
+  #endif
 }
 
 void connectToWiFiAsync( bool isInit ) {
@@ -1531,7 +1576,7 @@ void connectToWiFiSync() {
   }
 
   Serial.println( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
-  WiFi.hostname( ( String( getWiFiHostName() ) + "-" + String( ESP.getChipId() ) ).c_str() );
+  WiFi.hostname( getFullWiFiHostName().c_str() );
   WiFi.begin( wiFiClientSsid, wiFiClientPassword );
 
   if( WiFi.isConnected() ) {
@@ -2634,8 +2679,12 @@ void handleWebServerGetMonitor() {
       "\"dsp\":") ) + String( static_cast<uint8_t>( round( displayPreviousBrightness ) ) ) + String( F(""
     "},"
     "\"ram\":{"
-      "\"heap\":\"") ) + String( ESP.getFreeHeap() ) + String( F("\","
-      "\"frag\":\"") ) + String( ESP.getHeapFragmentation() ) + String( F("\""
+      "\"heap\":\"") ) + String( ESP.getFreeHeap() ) + String( F("\"") );
+      #ifdef ESP8266
+      content = content + String( F(","
+        "\"frag\":\"") ) + String( ESP.getHeapFragmentation() ) + String( F("\"") );
+      #endif
+      content = content + String( F(""
     "},"
     "\"cpu\":{"
       "\"freq\":\"") ) + String( ESP.getCpuFreqMHz() ) + String( F("\""
@@ -2702,11 +2751,26 @@ void configureWebServer() {
 }
 
 
-
+#ifdef ESP8266
 WiFiEventHandler wiFiEventHandler;
 void onWiFiConnected( const WiFiEventStationModeConnected& event ) {
-  Serial.println( String( F("WiFi is connected to '") + String( event.ssid ) ) + String ( F("'") ) );
+  Serial.println( String( F("WiFi is connected to '") ) + String( event.ssid ) + String ( F("'") ) );
 }
+#else //ESP32 or ESP32S2
+void WiFiEvent( WiFiEvent_t event ) {
+  switch( event ) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+      Serial.println( String( F("WiFi is connected to '") ) + String( WiFi.SSID() ) + String ( F("' with IP ") ) + WiFi.localIP().toString() );
+      break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+      //
+      break;
+    default:
+      break;
+  }
+}
+#endif
+
 
 void setup() {
   initBeeper();
@@ -2723,7 +2787,11 @@ void setup() {
   LittleFS.begin();
 
   configureWebServer();
+  #ifdef ESP8266
   wiFiEventHandler = WiFi.onStationModeConnected( &onWiFiConnected );
+  #else //ESP32 or ESP32S2
+  WiFi.onEvent( WiFiEvent );
+  #endif
   connectToWiFiAsync( true );
   startWebServer();
   initTimeClient();
