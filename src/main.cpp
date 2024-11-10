@@ -643,7 +643,8 @@ void renderDisplayText( String hourStr, String minuteStr, String secondStr, bool
   String textToDisplayLarge = hourStr + ( isSemicolonShown ? ":" : "\t" ) + minuteStr;
   String textToDisplaySmall = secondStr;
   if( isTimerRunning ) {
-    textToDisplayLarge = hourStr + ( isSemicolonShown ? "\b" : "\f" ) + minuteStr;
+    bool isTimerSemicolonShown = ( calculateDiffMillis( timerCurrentStartedTimeMillis, millis() ) % ( isSlowSemicolonAnimation ? 2000 : 1000 ) ) < ( isSlowSemicolonAnimation ? 1000 : 500 );
+    textToDisplayLarge = hourStr + ( isTimerSemicolonShown ? "\b" : "\f" ) + minuteStr;
   } else if( isTimerSetupRunning ) {
     textToDisplayLarge = hourStr + String( ":" ) + minuteStr;
   } else if( isTimerBlinking ) {
