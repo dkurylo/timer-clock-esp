@@ -59,6 +59,17 @@
 #define BRIGHTNESS_INPUT_PIN 3
 #endif
 
+//ESP8266 has 10-bit ADC (0-1023)
+//ESP32 has 12-bit ADC (0-4095)
+//ESP32-S2 has 13-bit ADC (0-8191)
+#ifdef ESP8266
+#define ADC_RESOLUTION 10
+#else //ESP32 or ESP32S2
+#define ADC_RESOLUTION 13
+#endif
+#define ADC_NUMBER_OF_VALUES ( 1 << ADC_RESOLUTION )
+#define ADC_STEP_FOR_BYTE ( ADC_NUMBER_OF_VALUES / ( 1 << ( 8 * sizeof( uint8_t ) ) ) )
+
 bool isNewBoard = false;
 const char* getFirmwareVersion() { const char* result = "1.00"; return result; }
 
@@ -137,12 +148,13 @@ char wiFiClientSsid[WIFI_SSID_MAX_LENGTH];
 char wiFiClientPassword[WIFI_PASSWORD_MAX_LENGTH];
 
 uint8_t displayFontTypeNumber = 0;
+const uint8_t NUMBER_OF_FONTS_SUPPORTED = 3;
 bool isDisplayBoldFontUsed = true;
 bool isDisplayCompactLayoutUsed = false;
 bool isDisplaySecondsShown = false;
 bool isProgressIndicatorShown = false;
-uint8_t displayDayModeBrightness = 9;
-uint8_t displayNightModeBrightness = 1;
+uint8_t displayDayBrightness = 9;
+uint8_t displayNightBrightness = 1;
 bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
 bool isSingleDigitHourShown = false;
@@ -150,15 +162,15 @@ bool isRotateDisplay = false;
 bool isTimerAnimated = false;
 bool isClockAnimated = false;
 uint8_t animationTypeNumber = 0;
-uint8_t NUMBER_OF_ANIMATIONS_SUPPORTED = 5;
+const uint8_t NUMBER_OF_ANIMATIONS_SUPPORTED = 5;
 
 //brightness settings
 #ifdef ESP8266
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 10; //ESP8266 has 10-bit ADC (0-1023)
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 350; //ESP8266 has 10-bit ADC (0-1023)
+uint16_t sensorBrightnessNightLevel = 8; //ESP8266 has 10-bit ADC (0-1023)
+uint16_t sensorBrightnessDayLevel = 512; //ESP8266 has 10-bit ADC (0-1023)
 #else //ESP32 or ESP32S2
-const uint16_t SENSOR_BRIGHTNESS_NIGHT_LEVEL = 80; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
-const uint16_t SENSOR_BRIGHTNESS_DAY_LEVEL = 2800; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
+uint16_t sensorBrightnessNightLevel = 32; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
+uint16_t sensorBrightnessDayLevel = 4096; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
 #endif
 
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
@@ -290,9 +302,11 @@ const uint16_t eepromWiFiPasswordIndex = eepromWiFiSsidIndex + WIFI_SSID_MAX_LEN
 const uint16_t eepromDisplayFontTypeNumberIndex = eepromWiFiPasswordIndex + WIFI_PASSWORD_MAX_LENGTH;
 const uint16_t eepromIsFontBoldUsedIndex = eepromDisplayFontTypeNumberIndex + 1;
 const uint16_t eepromIsDisplaySecondsShownIndex = eepromIsFontBoldUsedIndex + 1;
-const uint16_t eepromDisplayDayModeBrightnessIndex = eepromIsDisplaySecondsShownIndex + 1;
-const uint16_t eepromDisplayNightModeBrightnessIndex = eepromDisplayDayModeBrightnessIndex + 1;
-const uint16_t eepromTimerSetupResetTimeIndex = eepromDisplayNightModeBrightnessIndex + 1;
+const uint16_t eepromDisplayDayBrightnessIndex = eepromIsDisplaySecondsShownIndex + 1;
+const uint16_t eepromDisplayNightBrightnessIndex = eepromDisplayDayBrightnessIndex + 1;
+const uint16_t eepromSensorBrightnessDayLevelIndex = eepromDisplayNightBrightnessIndex + 1;
+const uint16_t eepromSensorBrightnessNightLevelIndex = eepromSensorBrightnessDayLevelIndex + 1;
+const uint16_t eepromTimerSetupResetTimeIndex = eepromSensorBrightnessNightLevelIndex + 1;
 const uint16_t eepromTimerRememberLastInputTimeIndex = eepromTimerSetupResetTimeIndex + 1;
 const uint16_t eepromTimerDeltaPressIndex = eepromTimerRememberLastInputTimeIndex + 1;
 const uint16_t eepromTimerDeltaTurnIndex = eepromTimerDeltaPressIndex + 1;
@@ -388,12 +402,23 @@ void loadEepromData() {
     readEepromCharArray( eepromWiFiSsidIndex, wiFiClientSsid, WIFI_SSID_MAX_LENGTH, true );
     readEepromCharArray( eepromWiFiPasswordIndex, wiFiClientPassword, WIFI_PASSWORD_MAX_LENGTH, true );
     readEepromIntValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber, true );
+    if( displayFontTypeNumber > NUMBER_OF_FONTS_SUPPORTED - 1 ) displayFontTypeNumber = 0;
     readEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFontUsed, true );
     readEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShown, true );
-    readEepromIntValue( eepromDisplayDayModeBrightnessIndex, displayDayModeBrightness, true );
-    readEepromIntValue( eepromDisplayNightModeBrightnessIndex, displayNightModeBrightness, true );
-    if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
+    readEepromIntValue( eepromDisplayDayBrightnessIndex, displayDayBrightness, true );
+    if( displayDayBrightness > 15 ) displayDayBrightness = 15;
+    readEepromIntValue( eepromDisplayNightBrightnessIndex, displayNightBrightness, true );
+    if( displayNightBrightness > 15 ) displayNightBrightness = 15;
+    if( displayNightBrightness > displayDayBrightness ) displayNightBrightness = displayDayBrightness;
+    uint8_t eepromSensorBrightnessDayLevel = 0;
+    readEepromIntValue( eepromSensorBrightnessDayLevelIndex, eepromSensorBrightnessDayLevel, true );
+    sensorBrightnessDayLevel = ( (uint16_t)eepromSensorBrightnessDayLevel ) * ADC_STEP_FOR_BYTE;
+    uint8_t eepromSensorBrightnessNightLevel = 0;
+    readEepromIntValue( eepromSensorBrightnessNightLevelIndex, eepromSensorBrightnessNightLevel, true );
+    sensorBrightnessNightLevel = ( (uint16_t)eepromSensorBrightnessNightLevel ) * ADC_STEP_FOR_BYTE;
+    if( sensorBrightnessNightLevel > sensorBrightnessDayLevel ) sensorBrightnessNightLevel = sensorBrightnessDayLevel;
     readEepromIntValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds, true );
+    if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
     readEepromIntValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes, true );
     readEepromIntValue( eepromTimerDeltaPressIndex, timerDeltaPressMinutes, true );
     readEepromIntValue( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds, true );
@@ -407,6 +432,7 @@ void loadEepromData() {
     readEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimated, true );
     readEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimated, true );
     readEepromIntValue( eepromAnimationTypeNumberIndex, animationTypeNumber, true );
+    if( animationTypeNumber > NUMBER_OF_ANIMATIONS_SUPPORTED - 1 ) animationTypeNumber = 0;
     readEepromBoolValue( eepromIsCompactLayoutShownIndex, isDisplayCompactLayoutUsed, true );
 
   } else { //fill EEPROM with default values when starting the new board
@@ -417,8 +443,10 @@ void loadEepromData() {
     writeEepromIntValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber );
     writeEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFontUsed );
     writeEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShown );
-    writeEepromIntValue( eepromDisplayDayModeBrightnessIndex, displayDayModeBrightness );
-    writeEepromIntValue( eepromDisplayNightModeBrightnessIndex, displayNightModeBrightness );
+    writeEepromIntValue( eepromDisplayDayBrightnessIndex, displayDayBrightness );
+    writeEepromIntValue( eepromDisplayNightBrightnessIndex, displayNightBrightness );
+    writeEepromIntValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayLevel / ADC_STEP_FOR_BYTE ) );
+    writeEepromIntValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightLevel / ADC_STEP_FOR_BYTE ) );
     if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
     writeEepromIntValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds );
     writeEepromIntValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes );
@@ -451,12 +479,14 @@ void createAccessPoint() {
   apStartedMillis = millis();
   Serial.print( F("Creating WiFi AP...") );
   WiFi.softAPConfig( getWiFiAccessPointIp(), getWiFiAccessPointIp(), getWiFiAccessPointNetMask() );
+
   #ifdef ESP8266
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + String( ESP.getChipId() ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
   #else //ESP32 or ESP32S2
   String macAddress = String( ESP.getEfuseMac() );
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + macAddress.substring( macAddress.length() - 4 ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
   #endif
+
   IPAddress accessPointIp = WiFi.softAPIP();
   dnsServer.start( 53, "*", accessPointIp );
   Serial.println( String( F(" done | IP: ") ) + accessPointIp.toString() );
@@ -494,7 +524,8 @@ void initInternalLed() {
   setInternalLedStatus( internalLedStatus );
 }
 
-//display functions
+
+//display functionality
 void forceDisplaySync() {
   isForceDisplaySync = true;
   isForceDisplaySyncDisplayRenderOverride = true;
@@ -543,7 +574,7 @@ bool isWithinDstBoundaries( time_t dt ) {
 
 
 //display functionality
-double displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
+double displayCurrentBrightness = static_cast<double>(displayNightBrightness);
 double displayPreviousBrightness = -1.0;
 double sensorBrightnessAverage = -1.0;
 int brightnessDiffSustainedMillis = 0;
@@ -557,12 +588,16 @@ void calculateDisplayBrightness() {
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( static_cast<double>(sensorBrightnessSamples) - static_cast<double>(1.0) ) + currentBrightness ) / static_cast<double>(sensorBrightnessSamples);
   }
 
-  if( sensorBrightnessAverage >= SENSOR_BRIGHTNESS_DAY_LEVEL ) {
-    displayCurrentBrightness = static_cast<double>(displayDayModeBrightness);
-  } else if( sensorBrightnessAverage <= SENSOR_BRIGHTNESS_NIGHT_LEVEL ) {
-    displayCurrentBrightness = static_cast<double>(displayNightModeBrightness);
+  if( sensorBrightnessAverage >= sensorBrightnessDayLevel ) {
+    displayCurrentBrightness = static_cast<double>(displayDayBrightness);
+  } else if( sensorBrightnessAverage <= sensorBrightnessNightLevel ) {
+    displayCurrentBrightness = static_cast<double>(displayNightBrightness);
   } else {
-    displayCurrentBrightness = displayNightModeBrightness + static_cast<double>( displayDayModeBrightness - displayNightModeBrightness ) * ( sensorBrightnessAverage - SENSOR_BRIGHTNESS_NIGHT_LEVEL ) / ( SENSOR_BRIGHTNESS_DAY_LEVEL - SENSOR_BRIGHTNESS_NIGHT_LEVEL );
+    float normalizedSensorBrightnessAverage = (float)(sensorBrightnessAverage - sensorBrightnessNightLevel) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
+    float steepnessCoefficient = 2.0;
+    float easingCoefficient = 1 - powf( 1 - normalizedSensorBrightnessAverage, steepnessCoefficient );
+    displayCurrentBrightness = displayNightBrightness + static_cast<double>( (displayDayBrightness - displayNightBrightness ) * easingCoefficient );
+    //displayCurrentBrightness = displayNightBrightness + static_cast<double>( displayDayBrightness - displayNightBrightness ) * ( sensorBrightnessAverage - sensorBrightnessNightLevel ) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
   }
 }
 
@@ -1589,7 +1624,7 @@ void connectToWiFiSync() {
   uint8_t previousInternalLedStatus = getInternalLedStatus();
   while( true ) {
     setInternalLedStatus( HIGH );
-    delay( 1000 );
+    delay( 500 );
     wl_status_t wifiStatus = WiFi.status();
     if( WiFi.isConnected() ) {
       Serial.println( F(" done") );
@@ -1721,7 +1756,7 @@ const char* HTML_INPUT_RADIO = "radio";
 const char* HTML_INPUT_COLOR = "color";
 const char* HTML_INPUT_RANGE = "range";
 
-String getHtmlInput( String label, const char* type, const char* value, const char* elId, const char* elName, uint8_t minLength, uint8_t maxLength, bool isRequired, bool isChecked, const char* additional, String rangeCodeReplacement ) {
+String getHtmlInput( String label, const char* type, const char* value, const char* elId, const char* elName, uint8_t minLength, uint16_t maxLength, uint8_t step, bool isRequired, bool isChecked, const char* additional, String rangeCodeReplacement ) {
   return ( (strcmp(type, HTML_INPUT_TEXT) == 0 || strcmp(type, HTML_INPUT_PASSWORD) == 0 || strcmp(type, HTML_INPUT_COLOR) == 0 || strcmp(type, HTML_INPUT_RANGE) == 0) ? getHtmlLabel( label, elId, true ) : "" ) +
     String( F("<input"
       " type=\"") ) + type + String( F("\""
@@ -1732,7 +1767,7 @@ String getHtmlInput( String label, const char* type, const char* value, const ch
       ( isRequired && (strcmp(type, HTML_INPUT_TEXT) == 0 || strcmp(type, HTML_INPUT_PASSWORD) == 0) ? F(" required") : F("") ) +
       ( isChecked && (strcmp(type, HTML_INPUT_RADIO) == 0 || strcmp(type, HTML_INPUT_CHECKBOX) == 0) ? F(" checked") : F("") ) +
       ( " " + String( additional ) ) +
-      ( (strcmp(type, HTML_INPUT_RANGE) == 0) ? String( F(" min=\"") ) + String( minLength ) + String( F("\" max=\"") ) + String(maxLength) + String( F("\"") ) + ( String( rangeCodeReplacement ) == "" ? ( String( F(" oninput=\"this.nextElementSibling.value=this.value;\"><output>") ) + String( value ) + String( F("</output") ) ) : ( String( F(" ") ) + rangeCodeReplacement ) ) : "" ) +
+      ( (strcmp(type, HTML_INPUT_RANGE) == 0) ? String( F(" min=\"") ) + String( minLength ) + String( F("\" max=\"") ) + String(maxLength) + String( F("\"") ) + ( step > 0 ? String( F(" step=\"") ) + String(step) + String( F("\"") ) : "" ) + ( String( rangeCodeReplacement ) == "" ? ( String( F(" oninput=\"this.nextElementSibling.value=this.value;\"><output>") ) + String( value ) + String( F("</output") ) ) : ( String( F(" ") ) + rangeCodeReplacement ) ) : "" ) +
     ">" +
       ( (strcmp(type, HTML_INPUT_TEXT) != 0 && strcmp(type, HTML_INPUT_PASSWORD) != 0 && strcmp(type, HTML_INPUT_COLOR) != 0 && strcmp(type, HTML_INPUT_RANGE) != 0) ? getHtmlLabel( label, elId, false ) : "" );
 }
@@ -1764,6 +1799,8 @@ const char* HTML_PAGE_ROTATE_DISPLAY_NAME = "rot";
 const char* HTML_PAGE_ANIMATION_TYPE_NAME = "at";
 const char* HTML_PAGE_BRIGHTNESS_DAY_NAME = "brtd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_NAME = "brtn";
+const char* HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME = "brsd";
+const char* HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME = "brsn";
 
 void handleWebServerGet() {
   String content;
@@ -1779,37 +1816,39 @@ void handleWebServerGet() {
   "<form method=\"POST\">"
   "<div class=\"fx\">"
     "<h2>Приєднатись до WiFi:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), true, false, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), true, false, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, getWiFiClientSsidNameMaxLength(), 0, true, false, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, getWiFiClientSsidPasswordMaxLength(), 0, true, false, "", "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування таймера:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, 5, 240, false, timerSetupResetTimeSeconds, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, false, timerRememberLastInputTimeMinutes, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, false, timerDeltaPressMinutes, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, false, timerDeltaTurnSeconds, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(alarmBlinkingTimeMinutes).c_str(), HTML_PAGE_ALARM_BLINKING_TIME_NAME, HTML_PAGE_ALARM_BLINKING_TIME_NAME, 0, 240, false, alarmBlinkingTimeMinutes, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(alarmBeepingTimeSeconds).c_str(), HTML_PAGE_ALARM_BEEPING_TIME_NAME, HTML_PAGE_ALARM_BEEPING_TIME_NAME, 0, 240, false, alarmBeepingTimeSeconds, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, false, isProgressIndicatorShown, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, false, isTimerAnimated, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вихід з налаштувань (сек)"), HTML_INPUT_RANGE, String(timerSetupResetTimeSeconds).c_str(), HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, HTML_PAGE_ALARM_SETUP_RESET_TIME_NAME, 5, 240, 0, false, timerSetupResetTimeSeconds, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Пам'ять таймера (хв)"), HTML_INPUT_RANGE, String(timerRememberLastInputTimeMinutes).c_str(), HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, HTML_PAGE_TIMER_REMEMBER_LAST_INPUT_NAME, 0, 240, 0, false, timerRememberLastInputTimeMinutes, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при натиску (хв)"), HTML_INPUT_RANGE, String(timerDeltaPressMinutes).c_str(), HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, HTML_PAGE_TIMER_PRESS_AMOUNT_NAME, 0, 60, 0, false, timerDeltaPressMinutes, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час при повороті (сек)"), HTML_INPUT_RANGE, String(timerDeltaTurnSeconds).c_str(), HTML_PAGE_TIMER_TURN_AMOUNT_NAME, HTML_PAGE_TIMER_TURN_AMOUNT_NAME, 1, 240, 0, false, timerDeltaTurnSeconds, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час моргання (хв)"), HTML_INPUT_RANGE, String(alarmBlinkingTimeMinutes).c_str(), HTML_PAGE_ALARM_BLINKING_TIME_NAME, HTML_PAGE_ALARM_BLINKING_TIME_NAME, 0, 240, 0, false, alarmBlinkingTimeMinutes, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Час пищання (сек)"), HTML_INPUT_RANGE, String(alarmBeepingTimeSeconds).c_str(), HTML_PAGE_ALARM_BEEPING_TIME_NAME, HTML_PAGE_ALARM_BEEPING_TIME_NAME, 0, 240, 0, false, alarmBeepingTimeSeconds, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати прогрес таймера"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME, 0, 0, 0, false, isProgressIndicatorShown, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, 0, false, isTimerAnimated, "", "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування годинника:</h2>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, false, isClockAnimated, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, 0, false, isClockAnimated, "", "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx\">"
     "<h2>Налаштування дисплея:</h2>"
     "<div class=\"fi pl\"><div id=\"exw\"><div id=\"exlw\"" ) ) + ( isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + "><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"" + ( !isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + String( F("><div><div></div></div></div></div></div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, 2, false, displayFontTypeNumber, "onchange=\"pv();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pv();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, false, isDisplaySecondsShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, false, isSingleDigitHourShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Зменшити відстань до двокрапок"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_COMPACT_LAYOUT_NAME, HTML_PAGE_COMPACT_LAYOUT_NAME, 0, 0, false, isDisplayCompactLayoutUsed, "onchange=\"pv();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, false, isSlowSemicolonAnimation, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, false, isRotateDisplay, "onchange=\"rt();\"", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, NUMBER_OF_ANIMATIONS_SUPPORTED - 1, false, animationTypeNumber, "", String( F( "oninput=\"this.nextElementSibling.src='/data?p='+this.value;\"><img class=\"ap\" src=\"/data?p=" ) ) + String( animationTypeNumber ) + String( F( "\"" ) ) ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, false, displayDayModeBrightness, "", "" ) + String( F("</div>"
-    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightModeBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, false, displayNightModeBrightness, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид шрифта"), HTML_INPUT_RANGE, String(displayFontTypeNumber).c_str(), HTML_PAGE_FONT_TYPE_NAME, HTML_PAGE_FONT_TYPE_NAME, 0, NUMBER_OF_FONTS_SUPPORTED - 1, 0, false, displayFontTypeNumber, "onchange=\"pv();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Жирний шрифт"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_BOLD_FONT_NAME, HTML_PAGE_BOLD_FONT_NAME, 0, 0, 0, false, isDisplayBoldFontUsed, "onchange=\"pv();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, 0, false, isDisplaySecondsShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, 0, false, isSingleDigitHourShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Зменшити відстань до двокрапок"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_COMPACT_LAYOUT_NAME, HTML_PAGE_COMPACT_LAYOUT_NAME, 0, 0, 0, false, isDisplayCompactLayoutUsed, "onchange=\"pv();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Повільні двокрапки (30 разів в хв)"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME, 0, 0, 0, false, isSlowSemicolonAnimation, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Розвернути зображення на 180°"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_ROTATE_DISPLAY_NAME, HTML_PAGE_ROTATE_DISPLAY_NAME, 0, 0, 0, false, isRotateDisplay, "onchange=\"rt();\"", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 0, NUMBER_OF_ANIMATIONS_SUPPORTED - 1, 0, false, animationTypeNumber, "", String( F( "oninput=\"this.nextElementSibling.src='/data?p='+this.value;\"><img class=\"ap\" src=\"/data?p=" ) ) + String( animationTypeNumber ) + String( F( "\"" ) ) ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, 0, false, displayDayBrightness, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, 0, false, displayNightBrightness, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Сенсор яскравості (день)"), HTML_INPUT_RANGE, String(sensorBrightnessDayLevel).c_str(), HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, sensorBrightnessDayLevel, "", "" ) + String( F("</div>"
+    "<div class=\"fi pl\">") ) + getHtmlInput( F("Сенсор яскравості (ніч)"), HTML_INPUT_RANGE, String(sensorBrightnessNightLevel).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, sensorBrightnessNightLevel, "", "" ) + String( F("</div>"
   "</div>"
   "<div class=\"fx ft\">"
     "<div class=\"fi\"><button type=\"submit\">Застосувати</button></div>"
@@ -2072,7 +2111,7 @@ void handleWebServerPost() {
   String htmlPageDisplayFontTypeNumberReceived = wifiWebServer.arg( HTML_PAGE_FONT_TYPE_NAME );
   uint displayFontTypeNumberReceived = htmlPageDisplayFontTypeNumberReceived.toInt();
   bool displayFontTypeNumberReceivedPopulated = false;
-  if( displayFontTypeNumberReceived >= 0 && displayFontTypeNumberReceived <= 2 ) {
+  if( displayFontTypeNumberReceived >= 0 && displayFontTypeNumberReceived <= (uint)NUMBER_OF_FONTS_SUPPORTED - 1 ) {
     displayFontTypeNumberReceivedPopulated = true;
   }
 
@@ -2127,20 +2166,37 @@ void handleWebServerPost() {
     isSlowSemicolonAnimationReceivedPopulated = true;
   }
 
-  String htmlPageDisplayDayModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_NAME );
-  uint displayDayModeBrightnessReceived = htmlPageDisplayDayModeBrightnessReceived.toInt();
-  bool displayDayModeBrightnessReceivedPopulated = false;
-  if( displayDayModeBrightnessReceived >= 0 && displayDayModeBrightnessReceived <= 15 ) {
-    displayDayModeBrightnessReceivedPopulated = true;
+  String htmlPageDisplayDayBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_NAME );
+  uint displayDayBrightnessReceived = htmlPageDisplayDayBrightnessReceived.toInt();
+  bool displayDayBrightnessReceivedPopulated = false;
+  if( displayDayBrightnessReceived >= 0 && displayDayBrightnessReceived <= 15 ) {
+    displayDayBrightnessReceivedPopulated = true;
   }
 
-  String htmlPageDisplayNightModeBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_NIGHT_NAME );
-  uint displayNightModeBrightnessReceived = htmlPageDisplayNightModeBrightnessReceived.toInt();
-  bool displayNightModeBrightnessReceivedPopulated = false;
-  if( displayNightModeBrightnessReceived >= 0 && displayNightModeBrightnessReceived <= 15 ) {
-    displayNightModeBrightnessReceivedPopulated = true;
-    if( displayNightModeBrightnessReceived > displayDayModeBrightnessReceived ) {
-      displayNightModeBrightnessReceived = displayDayModeBrightnessReceived;
+  String htmlPageDisplayNightBrightnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_NIGHT_NAME );
+  uint displayNightBrightnessReceived = htmlPageDisplayNightBrightnessReceived.toInt();
+  bool displayNightBrightnessReceivedPopulated = false;
+  if( displayNightBrightnessReceived >= 0 && displayNightBrightnessReceived <= 15 ) {
+    displayNightBrightnessReceivedPopulated = true;
+    if( displayNightBrightnessReceived > displayDayBrightnessReceived ) {
+      displayNightBrightnessReceived = displayDayBrightnessReceived;
+    }
+  }
+
+  String htmlPageSensorBrightnessDayReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME );
+  uint sensorBrightnessDayReceived = htmlPageSensorBrightnessDayReceived.toInt();
+  bool sensorBrightnessDayReceivedPopulated = false;
+  if( sensorBrightnessDayReceived >= 0 && sensorBrightnessDayReceived <= ( ADC_NUMBER_OF_VALUES - 1 ) ) {
+    sensorBrightnessDayReceivedPopulated = true;
+  }
+
+  String htmlPageSensorBrightnessNightReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME );
+  uint sensorBrightnessNightReceived = htmlPageSensorBrightnessNightReceived.toInt();
+  bool sensorBrightnessNightReceivedPopulated = false;
+  if( sensorBrightnessNightReceived >= 0 && sensorBrightnessNightReceived <= ( ADC_NUMBER_OF_VALUES - 1 ) ) {
+    sensorBrightnessNightReceivedPopulated = true;
+    if( sensorBrightnessNightReceived > sensorBrightnessDayReceived ) {
+      sensorBrightnessNightReceived = sensorBrightnessDayReceived;
     }
   }
 
@@ -2266,20 +2322,36 @@ void handleWebServerPost() {
     forceDisplaySync();
   }
 
-  if( displayDayModeBrightnessReceivedPopulated && displayDayModeBrightnessReceived != displayDayModeBrightness ) {
-    displayDayModeBrightness = displayDayModeBrightnessReceived;
+  if( displayDayBrightnessReceivedPopulated && displayDayBrightnessReceived != displayDayBrightness ) {
+    displayDayBrightness = displayDayBrightnessReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     Serial.println( F("Display brightness updated") );
-    writeEepromIntValue( eepromDisplayDayModeBrightnessIndex, displayDayModeBrightnessReceived );
+    writeEepromIntValue( eepromDisplayDayBrightnessIndex, displayDayBrightnessReceived );
   }
 
-  if( displayNightModeBrightnessReceivedPopulated && displayNightModeBrightnessReceived != displayNightModeBrightness ) {
-    displayNightModeBrightness = displayNightModeBrightnessReceived;
+  if( displayNightBrightnessReceivedPopulated && displayNightBrightnessReceived != displayNightBrightness ) {
+    displayNightBrightness = displayNightBrightnessReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     Serial.println( F("Display night mode brightness updated") );
-    writeEepromIntValue( eepromDisplayNightModeBrightnessIndex, displayNightModeBrightnessReceived );
+    writeEepromIntValue( eepromDisplayNightBrightnessIndex, displayNightBrightnessReceived );
+  }
+
+  if( sensorBrightnessDayReceivedPopulated && sensorBrightnessDayReceived != sensorBrightnessDayLevel ) {
+    sensorBrightnessDayLevel = sensorBrightnessDayReceived;
+    isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
+    isDisplayRerenderRequiredAfterSettingChanged = true;
+    Serial.println( F("Sensor day brightness level updated") );
+    writeEepromIntValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayReceived / ADC_STEP_FOR_BYTE ) );
+  }
+
+  if( sensorBrightnessNightReceivedPopulated && sensorBrightnessNightReceived != sensorBrightnessNightLevel ) {
+    sensorBrightnessNightLevel = sensorBrightnessNightReceived;
+    isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
+    isDisplayRerenderRequiredAfterSettingChanged = true;
+    Serial.println( F("Sensor night brightness level updated") );
+    writeEepromIntValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightReceived / ADC_STEP_FOR_BYTE ) );
   }
 
   if( isWiFiChanged ) {
@@ -2565,7 +2637,7 @@ void handleWebServerGetTestNight() {
   addHtmlPageEnd( content );
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, getContentType( F("html") ), content );
-  setDisplayBrightness( displayNightModeBrightness );
+  setDisplayBrightness( displayNightBrightness );
   renderDisplay();
   delay( 6000 );
   setDisplayBrightness( true );
