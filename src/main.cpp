@@ -1555,7 +1555,7 @@ void disconnectFromWiFi( bool erasePreviousCredentials ) {
     delay( 10 );
     while( true ) {
       wifiStatus = WiFi.status();
-      if( wifiStatus == WL_DISCONNECTED || wifiStatus == WL_IDLE_STATUS ) break;
+      if( wifiStatus != WL_CONNECTED ) break;
       delay( 50 );
       Serial.print( "." );
     }
