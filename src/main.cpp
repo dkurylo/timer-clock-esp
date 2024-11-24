@@ -433,7 +433,7 @@ void loadEepromData() {
     readEepromCharArray( eepromWiFiSsidIndex, wiFiClientSsid, WIFI_SSID_MAX_LENGTH, true );
     readEepromCharArray( eepromWiFiPasswordIndex, wiFiClientPassword, WIFI_PASSWORD_MAX_LENGTH, true );
     readEepromIntValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber, true );
-    if( displayFontTypeNumber > TCFonts::TCFonts::NUMBER_OF_FONTS_SUPPORTED - 1 ) displayFontTypeNumber = 0;
+    if( displayFontTypeNumber > TCFonts::NUMBER_OF_FONTS_SUPPORTED - 1 ) displayFontTypeNumber = 0;
     readEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFontUsed, true );
     readEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShown, true );
     readEepromIntValue( eepromDisplayDayBrightnessIndex, displayDayBrightness, true );
