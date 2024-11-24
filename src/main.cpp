@@ -496,6 +496,7 @@ void loadEepromData() {
     writeEepromIntValue( eepromAnimationTypeNumberIndex, animationTypeNumber );
     writeEepromBoolValue( eepromIsCompactLayoutShownIndex, isDisplayCompactLayoutUsed );
     writeEepromFontData( true );
+
     isNewBoard = false;
   }
 }
@@ -984,6 +985,7 @@ void calculateTimeToShow( String& hourStr, String& minuteStr, String& secondStr,
 
 std::vector<std::vector<bool>> getDisplayPreview( String hourStrPreview, String minuteStrPreview, String secondStrPreview, uint8_t fontNumberPreview, bool isBoldPreview, bool isSecondsShownPreview, bool isCompactLayoutPreview ) {
   std::vector<std::vector<bool>> preview( DISPLAY_HEIGHT, std::vector<bool>( DISPLAY_WIDTH, false ) );
+
   String textToDisplayLargePreview = hourStrPreview + ":" + minuteStrPreview;
   String textToDisplaySmallPreview = secondStrPreview;
 
@@ -993,9 +995,11 @@ std::vector<std::vector<bool>> getDisplayPreview( String hourStrPreview, String 
 
   for( size_t charToDisplayIndex = 0; charToDisplayIndex < textToDisplayLargePreview.length(); ++charToDisplayIndex ) {
     char charToDisplay = textToDisplayLargePreview.charAt( charToDisplayIndex );
+
     uint8_t charLpWidth = TCFonts::getSymbolLp( fontNumberPreview, charToDisplay, isCompactLayoutPreview, isWideTextPreview, false );
     uint8_t charWidth = TCFonts::getSymbolWidth( fontNumberPreview, charToDisplay, isCompactLayoutPreview, isWideTextPreview, false );
     uint8_t charRpWidth = TCFonts::getSymbolRp( fontNumberPreview, charToDisplay, isCompactLayoutPreview, isWideTextPreview, false );
+
     if( displayWidthUsed + charLpWidth > DISPLAY_WIDTH ) {
       charLpWidth = DISPLAY_WIDTH - displayWidthUsed;
     }
