@@ -40,9 +40,28 @@
 #endif
 
 #ifdef ESP8266
+
+#else //ESP32 or ESP32S2
+#define BATTERY_PRESENT_PIN 34
+#define BATTERY_POWERED_PIN 33
+#endif
+bool isBatteryInstalled = false;
+bool isEnergySavingMode = false;
+bool isBeepWhenSwitchingToBattery = true;
+bool isBeepWhenSwitchingFromBattery = true;
+
+#ifdef ESP8266
 #define BRIGHTNESS_INPUT_PIN A0
 #else //ESP32 or ESP32S2
 #define BRIGHTNESS_INPUT_PIN 3
+#endif
+
+#ifdef ESP8266
+
+#elif defined(ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+  #define HARD_RESET_PIN 14 //has to be high on load to perform hard reset
+#else
+
 #endif
 
 //ESP8266 has 10-bit ADC (0-1023)
@@ -77,6 +96,11 @@
 uint8_t EEPROM_FLASH_DATA_VERSION = 2; //change to next number when eeprom data format is changed. 255 is a reserved value: is set to 255 when: hard reset pin is at 3.3V (high); during factory reset procedure; when FW is loaded to a new device (EEPROM reads FF => 255)
 uint8_t eepromFlashDataVersion = EEPROM_FLASH_DATA_VERSION;
 const char* getFirmwareVersion() { const char* result = "1.00"; return result; }
+//device name
+char deviceName[16 + 1];
+
+//wifi configuration
+bool isWiFiRadioShutDown = false;
 
 //wifi access point configuration
 const char* getWiFiAccessPointSsid() { const char* result = "Timer Clock"; return result; };
@@ -84,9 +108,6 @@ const char* getWiFiAccessPointPassword() { const char* result = "1029384756"; re
 const IPAddress getWiFiAccessPointIp() { IPAddress result( 192, 168, 1, 1 ); return result; };
 const IPAddress getWiFiAccessPointNetMask() { IPAddress result( 255, 255, 255, 0 ); return result; };
 const uint32_t TIMEOUT_AP = 120000;
-
-//device name
-char deviceName[16 + 1];
 
 //wifi client configuration
 const char* getWiFiHostName() { const char* result = "Timer-Clock"; return result; }
@@ -122,7 +143,7 @@ uint8_t actionBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the t
 #ifdef ESP8266
 const bool IS_LOW_LEVEL_BUZZER = true;
 #else //ESP32 or ESP32S2
-const bool IS_LOW_LEVEL_BUZZER = false;
+const bool IS_LOW_LEVEL_BUZZER = true;
 #endif
 
 const uint32_t TIMER_MAX_TIME_TO_SET_UP = ( 23 * 60 + 59 ) * 60 * 1000;
@@ -167,6 +188,7 @@ bool isRotateDisplay = false;
 bool isTimerAnimated = false;
 bool isClockAnimated = false;
 uint8_t animationTypeNumber = 1;
+
 
 //brightness settings
 #ifdef ESP8266
@@ -276,22 +298,31 @@ String getContentType( String fileExtension ) {
   return contentType;
 }
 
+void writeToSerial( String data, bool isNextLine ) {
+  if( isEnergySavingMode ) return;
+  if( isNextLine ) {
+    Serial.println( data );
+  } else {
+    Serial.print( data );
+  }
+}
+
 File getFileFromFlash( String fileName ) {
   bool isGzippedFileRequested = fileName.endsWith( F(".gz") );
 
   File root = LittleFS.open("/", "r");
   if (!root || !root.isDirectory()) {
-    Serial.println("Failed to open directory");
+    writeToSerial( F("Failed to open directory"), true );
   } else {
-    Serial.println("Succeeded to open directory");
+    writeToSerial( F("Succeeded to open directory"), true );
   }
   File file2 = root.openNextFile();
   while (file2) {
-    Serial.print(file2.name());
+    writeToSerial( file2.name(), false );
     file2 = root.openNextFile();
   }
 
-  File file = LittleFS.open( "/" + fileName + ( isGzippedFileRequested ? "" : ".gz" ), "r" );
+  File file = LittleFS.open( "/" + fileName + ( isGzippedFileRequested ? "" : String( F(".gz") ) ), "r" );
   if( !isGzippedFileRequested && !file ) {
     file = LittleFS.open( "/" + fileName, "r" );
   }
@@ -522,28 +553,28 @@ void createAccessPoint() {
   if( isApInitialized ) return;
   isApInitialized = true;
   apStartedMillis = millis();
-  Serial.print( F("Creating WiFi AP...") );
+  writeToSerial( F("Creating WiFi AP..."), false );
   WiFi.softAPConfig( getWiFiAccessPointIp(), getWiFiAccessPointIp(), getWiFiAccessPointNetMask() );
-
   #ifdef ESP8266
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + String( ESP.getChipId() ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
   #else //ESP32 or ESP32S2
   String macAddress = String( ESP.getEfuseMac() );
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + macAddress.substring( macAddress.length() - 4 ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
   #endif
-
+  isWiFiRadioShutDown = false;
   IPAddress accessPointIp = WiFi.softAPIP();
   dnsServer.start( 53, "*", accessPointIp );
-  Serial.println( String( F(" done | IP: ") ) + accessPointIp.toString() );
+  writeToSerial( String( F(" done | IP: ") ) + accessPointIp.toString(), true );
 }
 
 void shutdownAccessPoint() {
   if( !isApInitialized ) return;
   isApInitialized = false;
-  Serial.print( F("Shutting down WiFi AP...") );
+  writeToSerial( F("Shutting down WiFi AP..."), false );
   dnsServer.stop();
   WiFi.softAPdisconnect( true );
-  Serial.println( F(" done") );
+  isWiFiRadioShutDown = false;
+  writeToSerial( F(" done"), true );
 }
 
 
@@ -633,16 +664,20 @@ void calculateDisplayBrightness() {
     sensorBrightnessAverage = ( sensorBrightnessAverage * ( static_cast<double>(sensorBrightnessSamples) - static_cast<double>(1.0) ) + currentBrightness ) / static_cast<double>(sensorBrightnessSamples);
   }
 
-  if( sensorBrightnessAverage >= sensorBrightnessDayLevel ) {
-    displayCurrentBrightness = static_cast<double>(displayDayBrightness);
-  } else if( sensorBrightnessAverage <= sensorBrightnessNightLevel ) {
-    displayCurrentBrightness = static_cast<double>(displayNightBrightness);
+  if( isEnergySavingMode ) {
+    displayCurrentBrightness = static_cast<double>(0);
   } else {
-    float normalizedSensorBrightnessAverage = (float)(sensorBrightnessAverage - sensorBrightnessNightLevel) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
-    float steepnessCoefficient = 2.0;
-    float easingCoefficient = 1 - powf( 1 - normalizedSensorBrightnessAverage, steepnessCoefficient );
-    displayCurrentBrightness = displayNightBrightness + static_cast<double>( (displayDayBrightness - displayNightBrightness ) * easingCoefficient );
-    //displayCurrentBrightness = displayNightBrightness + static_cast<double>( displayDayBrightness - displayNightBrightness ) * ( sensorBrightnessAverage - sensorBrightnessNightLevel ) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
+    if( sensorBrightnessAverage >= sensorBrightnessDayLevel ) {
+      displayCurrentBrightness = static_cast<double>(displayDayBrightness);
+    } else if( sensorBrightnessAverage <= sensorBrightnessNightLevel ) {
+      displayCurrentBrightness = static_cast<double>(displayNightBrightness);
+    } else {
+      float normalizedSensorBrightnessAverage = (float)(sensorBrightnessAverage - sensorBrightnessNightLevel) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
+      float steepnessCoefficient = 2.00;
+      float easingCoefficient = 1 - powf( 1 - normalizedSensorBrightnessAverage, steepnessCoefficient );
+      displayCurrentBrightness = displayNightBrightness + static_cast<double>( (displayDayBrightness - displayNightBrightness ) * easingCoefficient );
+      //displayCurrentBrightness = displayNightBrightness + static_cast<double>( displayDayBrightness - displayNightBrightness ) * ( sensorBrightnessAverage - sensorBrightnessNightLevel ) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
+    }
   }
 }
 
@@ -660,15 +695,20 @@ void setDisplayBrightness( bool isInit ) {
     updateDisplayBrightness = true;
     brightnessDiffSustainedMillis = 0;
   } else if( displayCurrentBrightnessInt != displayPreviousBrightnessInt ) {
-    if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ||
-        ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ) {
+    if( isEnergySavingMode ) {
       updateDisplayBrightness = true;
       brightnessDiffSustainedMillis = 0;
     } else {
-      brightnessDiffSustainedMillis += DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK;
-      if( brightnessDiffSustainedMillis >= SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS ) {
+      if( ( displayCurrentBrightness > displayPreviousBrightness && ( displayCurrentBrightness > ( ceil( displayCurrentBrightness ) - 0.5 + SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ||
+          ( displayCurrentBrightness < displayPreviousBrightness && ( displayCurrentBrightness < ( floor(  displayCurrentBrightness ) + 0.5 - SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS ) ) ) ) {
         updateDisplayBrightness = true;
         brightnessDiffSustainedMillis = 0;
+      } else {
+        brightnessDiffSustainedMillis += DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK;
+        if( brightnessDiffSustainedMillis >= SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS ) {
+          updateDisplayBrightness = true;
+          brightnessDiffSustainedMillis = 0;
+        }
       }
     }
   } else {
@@ -681,9 +721,14 @@ void setDisplayBrightness( bool isInit ) {
   }
 }
 
-void initDisplay() {
-  calculateDisplayBrightness();
+void initDisplayPhase1() {
   display.begin();
+  display.control( MD_MAX72XX::INTENSITY, 0 );
+  display.clear();
+}
+
+void initDisplayPhase2() {
+  calculateDisplayBrightness();
   setDisplayBrightness( true );
   display.clear();
 }
@@ -1258,6 +1303,47 @@ void beeperProcessLoopTick() {
 }
 
 
+//power mode functions
+void powerModeProcessLoopTick( bool isInit ) {
+  #ifdef ESP8266
+
+  #else //ESP32 or ESP32S2
+  if( isInit ) {
+    isBatteryInstalled = digitalRead( BATTERY_PRESENT_PIN );
+    if( !isBatteryInstalled ) {
+      isEnergySavingMode = false;
+    }
+  }
+  if( isBatteryInstalled ) {
+    bool isEnergySavingModeCurrently = !digitalRead( BATTERY_POWERED_PIN );
+    if( !isInit ) {
+      if( !isTimerShortBeeping && !isTimerLongBeeping ) {
+        if( isEnergySavingModeCurrently && !isEnergySavingMode ) {
+          if( isBeepWhenSwitchingToBattery ) {
+            startShortBeep();
+          }
+        } else if( !isEnergySavingModeCurrently && isEnergySavingMode ) {
+          if( isBeepWhenSwitchingFromBattery ) {
+            startShortBeep();
+          }
+        }
+      }
+    }
+    isEnergySavingMode = isEnergySavingModeCurrently;
+  }
+  #endif
+}
+
+void initPowerModePin() {
+  #ifdef ESP8266
+
+  #else //ESP32 or ESP32S2
+  pinMode( BATTERY_PRESENT_PIN, INPUT_PULLDOWN );
+  pinMode( BATTERY_POWERED_PIN, INPUT_PULLDOWN );
+  #endif
+}
+
+
 //timer functions
 void startBlinking() {
   if( alarmBlinkingTimeMinutes == 0 ) return;
@@ -1485,6 +1571,9 @@ const unsigned long PUSH_DEBOUNCE_TIMEOUT_MILLIS = 250;
 bool isPushDebouncing = false; //blocks turns after a button is pressed for DEBOUNCE_TIMEOUT_MILLIS ms
 unsigned long pushDebounceStartMillis = 0;
 
+unsigned long encoderMovementDetectedMillis = 0; //used to not set sleep mode if encoder movement is detected
+const unsigned long ENCODER_MOVEMENT_DETECTION_POWER_TIMEOUT_MILLIS = 15000;
+
 void encoderProcessLoopTick() {
   enc.tick();
 
@@ -1495,17 +1584,21 @@ void encoderProcessLoopTick() {
 
   if( !enc.hold() && enc.left() ) {
     if( !isPushDebouncing ) {
+      encoderMovementDetectedMillis = millis();
       timerTurnLeft();
     }
   } else if( !enc.hold() && enc.right() ) {
     if( !isPushDebouncing ) {
+      encoderMovementDetectedMillis = millis();
       timerTurnRight();
     }
   } else if( enc.click() ) {
+    encoderMovementDetectedMillis = millis();
     timerButtonShortPress();
     isPushDebouncing = true;
     pushDebounceStartMillis = millis();
   } else if( enc.held() ) {
+    encoderMovementDetectedMillis = millis();
     timerButtonLongPress();
     isPushDebouncing = true;
     pushDebounceStartMillis = millis();
@@ -1519,10 +1612,10 @@ unsigned long timeClientUpdatedMillis = 0;
 void initTimeClient() {
   if( WiFi.isConnected() && !isTimeClientInitialised ) {
     timeClient.setUpdateInterval( DELAY_NTP_TIME_SYNC );
-    Serial.print( F("Starting NTP client...") );
+    writeToSerial( F("Starting NTP client..."), false );
     timeClient.begin();
     isTimeClientInitialised = true;
-    Serial.println( F(" done") );
+    writeToSerial( F(" done"), true );
   }
 }
 
@@ -1544,12 +1637,12 @@ void ntpProcessLoopTick() {
 
         String hourStr, minuteStr, secondStr;
         calculateTimeToShow( hourStr, minuteStr, secondStr, isSingleDigitHourShown );
-        Serial.println( String( F("NTP time sync completed. Time: ") ) + hourStr + ":" + minuteStr + ":" + secondStr + "." + timeClient.getSubSeconds() );
+        writeToSerial( String( F("NTP time sync completed. Time: ") ) + hourStr + ":" + minuteStr + ":" + secondStr + "." + timeClient.getSubSeconds(), true );
 
         forceDisplaySync();
       } else if( ntpStatus == NTPClient::STATUS_FAILED_RESPONSE ) {
         timeClient.setUpdateInterval( DELAY_NTP_TIME_SYNC_RETRY );
-        Serial.println( F("NTP time sync error") );
+        writeToSerial( F("NTP time sync error"), true );
       }
       previousMillisNtpStatusCheck = currentMillis;
     }
@@ -1590,21 +1683,24 @@ const String getWiFiStatusText( wl_status_t status ) {
   }
 }
 
-void disconnectFromWiFi( bool erasePreviousCredentials ) {
+void disconnectFromWiFi( bool turnWiFiModuleOff, bool erasePreviousCredentials ) {
   wl_status_t wifiStatus = WiFi.status();
-  if( wifiStatus != WL_IDLE_STATUS ) {
-    Serial.print( String( F("Disconnecting from WiFi '") ) + WiFi.SSID() + String( F("'...") ) );
+  if( wifiStatus != WL_DISCONNECTED && wifiStatus != WL_IDLE_STATUS && wifiStatus != WL_NO_SHIELD ) {
+    writeToSerial( String( F("Disconnecting from WiFi '") ) + WiFi.SSID() + String( F("'...") ), false );
     uint8_t previousInternalLedStatus = getInternalLedStatus();
     setInternalLedStatus( HIGH );
-    WiFi.disconnect( false, erasePreviousCredentials );
-    delay( 10 );
-    while( true ) {
-      wifiStatus = WiFi.status();
-      if( wifiStatus != WL_CONNECTED ) break;
-      delay( 50 );
-      Serial.print( "." );
+    WiFi.disconnect( turnWiFiModuleOff, erasePreviousCredentials );
+    isWiFiRadioShutDown = turnWiFiModuleOff;
+    if( !turnWiFiModuleOff ) {
+      delay( 10 );
+      while( true ) {
+        wifiStatus = WiFi.status();
+        if( wifiStatus != WL_CONNECTED ) break;
+        delay( 50 );
+        writeToSerial( ".", false );
+      }
     }
-    Serial.println( F(" done") );
+    writeToSerial( F(" done"), true );
     setInternalLedStatus( previousInternalLedStatus );
   }
 }
@@ -1628,9 +1724,10 @@ void connectToWiFiAsync( bool isInit ) {
     return;
   }
 
-  Serial.println( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
+  writeToSerial( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'...", true );
   WiFi.hostname( getFullWiFiHostName().c_str() );
   WiFi.begin( wiFiClientSsid, wiFiClientPassword );
+  isWiFiRadioShutDown = false;
 
   if( WiFi.isConnected() ) {
     shutdownAccessPoint();
@@ -1639,12 +1736,12 @@ void connectToWiFiAsync( bool isInit ) {
 
   wl_status_t wifiStatus = WiFi.status();
   if( WiFi.isConnected() ) {
-    Serial.println( String( F("WiFi is connected. Status: ") ) + getWiFiStatusText( wifiStatus ) );
+    writeToSerial( String( F("WiFi is connected. Status: ") ) + getWiFiStatusText( wifiStatus ), true );
     shutdownAccessPoint();
     forceRefreshData();
   } else if( !isInit && ( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS || wifiStatus == WL_DISCONNECTED ) ) {
-    Serial.println( String( F("WiFi is NOT connected. Status: ") ) + getWiFiStatusText( wifiStatus ) );
-    disconnectFromWiFi( false );
+    writeToSerial( String( F("WiFi is NOT connected. Status: ") ) + getWiFiStatusText( wifiStatus ), true );
+    disconnectFromWiFi( false, false );
     createAccessPoint();
   }
 }
@@ -1656,9 +1753,10 @@ void connectToWiFiSync() {
     return;
   }
 
-  Serial.println( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'..." );
+  writeToSerial( String( F("Connecting to WiFi '") ) + String( wiFiClientSsid ) + "'...", true );
   WiFi.hostname( getFullWiFiHostName().c_str() );
   WiFi.begin( wiFiClientSsid, wiFiClientPassword );
+  isWiFiRadioShutDown = false;
 
   if( WiFi.isConnected() ) {
     shutdownAccessPoint();
@@ -1672,15 +1770,15 @@ void connectToWiFiSync() {
     delay( 500 );
     wl_status_t wifiStatus = WiFi.status();
     if( WiFi.isConnected() ) {
-      Serial.println( F(" done") );
+      writeToSerial( F(" done"), true );
       setInternalLedStatus( previousInternalLedStatus );
       shutdownAccessPoint();
       forceRefreshData();
       break;
     } else if( ( wifiStatus == WL_NO_SSID_AVAIL || wifiStatus == WL_CONNECT_FAILED || wifiStatus == WL_CONNECTION_LOST || wifiStatus == WL_IDLE_STATUS ) && ( calculateDiffMillis( wiFiConnectStartedMillis, millis() ) >= TIMEOUT_CONNECT_WIFI_SYNC ) ) {
-      Serial.println( String( F(" ERROR: ") ) + getWiFiStatusText( wifiStatus ) );
+      writeToSerial( String( F(" ERROR: ") ) + getWiFiStatusText( wifiStatus ), true );
       setInternalLedStatus( previousInternalLedStatus );
-      disconnectFromWiFi( false );
+      disconnectFromWiFi( false, false );
       createAccessPoint();
       break;
     }
@@ -2357,50 +2455,50 @@ void handleWebServerPost() {
 
   if( timerSetupResetTimeSecondsReceivedPopulated && timerSetupResetTimeSecondsReceived != timerSetupResetTimeSeconds ) {
     timerSetupResetTimeSeconds = timerSetupResetTimeSecondsReceived;
-    Serial.println( F("Remember setup reset time updated") );
+    writeToSerial( F("Remember setup reset time updated"), true );
     writeEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSecondsReceived );
   }
 
   if( timerRememberLastInputTimeReceivedPopulated && timerRememberLastInputTimeReceived != timerRememberLastInputTimeMinutes ) {
     timerRememberLastInputTimeMinutes = timerRememberLastInputTimeReceived;
-    Serial.println( F("Remember last timer input time updated") );
+    writeToSerial( F("Remember last timer input time updated"), true );
     writeEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeReceived );
   }
 
   if( timerDeltaPressReceivedPopulated && timerDeltaPressReceived != timerDeltaPressMinutes ) {
     timerDeltaPressMinutes = timerDeltaPressReceived;
-    Serial.println( F("Timer press delta time updated") );
+    writeToSerial( F("Timer press delta time updated"), true );
     writeEepromUintValue( eepromTimerDeltaPressIndex, timerDeltaPressReceived );
   }
 
   if( timerDeltaTurnReceivedPopulated && timerDeltaTurnReceived != timerDeltaTurnSeconds ) {
     timerDeltaTurnSeconds = timerDeltaTurnReceived;
-    Serial.println( F("Timer turn delta time updated") );
+    writeToSerial( F("Timer turn delta time updated"), true );
     writeEepromUintValue( eepromTimerDeltaTurnIndex, timerDeltaTurnReceived );
   }
 
   if( timerBlinkingTimeReceivedPopulated && timerBlinkingTimeReceived != alarmBlinkingTimeMinutes ) {
     alarmBlinkingTimeMinutes = timerBlinkingTimeReceived;
-    Serial.println( F("Timer blinking time updated") );
+    writeToSerial( F("Timer blinking time updated"), true );
     writeEepromUintValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeReceived );
   }
 
   if( timerBeepingTimeReceivedPopulated && timerBeepingTimeReceived != alarmBeepingTimeSeconds ) {
     alarmBeepingTimeSeconds = timerBeepingTimeReceived;
-    Serial.println( F("Timer beeping time updated") );
+    writeToSerial( F("Timer beeping time updated"), true );
     writeEepromUintValue( eepromTimerBeepingTimeIndex, timerBeepingTimeReceived );
   }
 
   if( timerShowProgressIndicatorReceivedPopulated && timerShowProgressIndicatorReceived != isProgressIndicatorShown ) {
     isProgressIndicatorShown = timerShowProgressIndicatorReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Timer show progress updated") );
+    writeToSerial( F("Timer show progress updated"), true );
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, timerShowProgressIndicatorReceived );
   }
 
   if( isTimerAnimatedReceivedPopulated && isTimerAnimatedReceived != isTimerAnimated ) {
     isTimerAnimated = isTimerAnimatedReceived;
-    Serial.println( F("Timer animated updated") );
+    writeToSerial( F("Timer animated updated"), true );
     writeEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimatedReceived );
   }
 
@@ -2408,20 +2506,20 @@ void handleWebServerPost() {
   if( isSingleDigitHourShownReceivedPopulated && isSingleDigitHourShownReceived != isSingleDigitHourShown ) {
     isSingleDigitHourShown = isSingleDigitHourShownReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Show single digit hour updated") );
+    writeToSerial( F("Show single digit hour updated"), true );
     writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShownReceived );
   }
 
   if( isCompactLayoutReceivedPopulated && isCompactLayoutReceived != isDisplayCompactLayoutUsed ) {
     isDisplayCompactLayoutUsed = isCompactLayoutReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Compact layout updated") );
+    writeToSerial( F("Compact layout updated"), true );
     writeEepromBoolValue( eepromIsCompactLayoutShownIndex, isCompactLayoutReceived );
   }
 
   if( isClockAnimatedReceivedPopulated && isClockAnimatedReceived != isClockAnimated ) {
     isClockAnimated = isClockAnimatedReceived;
-    Serial.println( F("Clock animated updated") );
+    writeToSerial( F("Clock animated updated"), true );
     writeEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimatedReceived );
   }
 
@@ -2429,41 +2527,41 @@ void handleWebServerPost() {
   if( displayFontTypeNumberReceivedPopulated && displayFontTypeNumberReceived != displayFontTypeNumber ) {
     displayFontTypeNumber = displayFontTypeNumberReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Display font updated") );
+    writeToSerial( F("Display font updated"), true );
     writeEepromUintValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumberReceived );
   }
 
   if( isDisplayBoldFondUsedReceivedPopulated && isDisplayBoldFondUsedReceived != isDisplayBoldFontUsed ) {
     isDisplayBoldFontUsed = isDisplayBoldFondUsedReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Show seconds updated") );
+    writeToSerial( F("Show seconds updated"), true );
     writeEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFondUsedReceived );
   }
 
   if( isDisplaySecondsShownReceivedPopulated && isDisplaySecondsShownReceived != isDisplaySecondsShown ) {
     isDisplaySecondsShown = isDisplaySecondsShownReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Show seconds updated") );
+    writeToSerial( F("Show seconds updated"), true );
     writeEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShownReceived );
   }
 
   if( isRotateDisplayReceivedPopulated && isRotateDisplayReceived != isRotateDisplay ) {
     isRotateDisplay = isRotateDisplayReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Display rotation updated") );
+    writeToSerial( F("Display rotation updated"), true );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplayReceived );
   }
 
   if( animationTypeNumberReceivedPopulated && animationTypeNumberReceived != animationTypeNumber ) {
     animationTypeNumber = animationTypeNumberReceived;
-    Serial.println( F("Display animation updated") );
+    writeToSerial( F("Display animation updated"), true );
     writeEepromUintValue( eepromAnimationTypeNumberIndex, animationTypeNumberReceived );
   }
 
   if( isSlowSemicolonAnimationReceivedPopulated && isSlowSemicolonAnimationReceived != isSlowSemicolonAnimation ) {
     isSlowSemicolonAnimation = isSlowSemicolonAnimationReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Display semicolon speed updated") );
+    writeToSerial( F("Display semicolon speed updated"), true );
     writeEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimationReceived );
     forceDisplaySync();
   }
@@ -2472,7 +2570,7 @@ void handleWebServerPost() {
     displayDayBrightness = displayDayBrightnessReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Display brightness updated") );
+    writeToSerial( F("Display brightness updated"), true );
     writeEepromUintValue( eepromDisplayDayBrightnessIndex, displayDayBrightnessReceived );
   }
 
@@ -2480,7 +2578,7 @@ void handleWebServerPost() {
     displayNightBrightness = displayNightBrightnessReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Display night mode brightness updated") );
+    writeToSerial( F("Display night mode brightness updated"), true );
     writeEepromUintValue( eepromDisplayNightBrightnessIndex, displayNightBrightnessReceived );
   }
 
@@ -2488,7 +2586,7 @@ void handleWebServerPost() {
     sensorBrightnessDayLevel = sensorBrightnessDayReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Sensor day brightness level updated") );
+    writeToSerial( F("Sensor day brightness level updated"), true );
     writeEepromUintValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayReceived / ADC_STEP_FOR_BYTE ) );
   }
 
@@ -2496,19 +2594,19 @@ void handleWebServerPost() {
     sensorBrightnessNightLevel = sensorBrightnessNightReceived;
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
-    Serial.println( F("Sensor night brightness level updated") );
+    writeToSerial( F("Sensor night brightness level updated"), true );
     writeEepromUintValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightReceived / ADC_STEP_FOR_BYTE ) );
   }
 
   if( strcmp( deviceName, htmlPageDeviceNameReceived.c_str() ) != 0 ) {
-    Serial.println( F("Device name updated") );
+    writeToSerial( F("Device name updated"), true );
     strncpy( deviceName, htmlPageDeviceNameReceived.c_str(), sizeof(deviceName) );
     writeEepromCharArray( eepromDeviceNameIndex, deviceName, sizeof(deviceName) );
   }
 
 
   if( isWiFiChanged ) {
-    Serial.println( F("WiFi settings updated") );
+    writeToSerial( F("WiFi settings updated"), true );
     strncpy( wiFiClientSsid, htmlPageSsidNameReceived.c_str(), sizeof(wiFiClientSsid) );
     writeEepromCharArray( eepromWiFiSsidIndex, wiFiClientSsid, sizeof(wiFiClientSsid) );
     strncpy( wiFiClientPassword, htmlPageSsidPasswordReceived.c_str(), sizeof(wiFiClientPassword) );
@@ -2824,6 +2922,25 @@ void handleWebServerGetMonitor() {
     secondStr = ( second < 10 ? "0" : "" ) + String( second );
   }
 
+  String flash_mode = "";
+  FlashMode_t flash_mode_enum = ESP.getFlashChipMode();
+  switch( flash_mode_enum ) {
+    case FlashMode_t::FM_QIO: flash_mode = String( F("QIO") ); break;
+    case FlashMode_t::FM_QOUT: flash_mode = String( F("QOUT") ); break;
+    case FlashMode_t::FM_DIO: flash_mode = String( F("DIO") ); break;
+    case FlashMode_t::FM_DOUT: flash_mode = String( F("DOUT") ); break;
+    #ifdef ESP8266
+
+    #elif defined(ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    case FlashMode_t::FM_FAST_READ: flash_mode = String( F("FAST_READ") ); break;
+    case FlashMode_t::FM_SLOW_READ: flash_mode = String( F("SLOW_READ") ); break;
+    #else
+    case FlashMode_t::FM_FAST_READ: flash_mode = String( F("FAST_READ") ); break;
+    case FlashMode_t::FM_SLOW_READ: flash_mode = String( F("SLOW_READ") ); break;
+    #endif
+    default: flash_mode = String( F("Unknown") ); break;
+  }
+
   String content = String( F(""
   "{\n"
     "\t\"net\": {\n"
@@ -2848,12 +2965,16 @@ void handleWebServerGetMonitor() {
     "\t\"cpu\": {\n"
       "\t\t\"chip\": \"") ) +
         #ifdef ESP8266
-        String( F("ESP8266") )
-        #else //ESP32 or ESP32S2
-        String( F("ESP32 / ESP32S2") )
+        String( F("ESP8266") ) +
+        #elif defined(ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+        String( F("ESP32S2 / ESP32S3") ) +
+        #else
+        String( F("ESP32") ) +
         #endif
-      + String( F("\",\n"
-      "\t\t\"freq\": ") ) + String( ESP.getCpuFreqMHz() ) + String( F(",\n"
+      String( F("\",\n"
+      "\t\t\"cpu_freq\": ") ) + String( ESP.getCpuFreqMHz() ) + String( F(",\n"
+      "\t\t\"flash_freq\": ") ) + String( ESP.getFlashChipSpeed() / 1000000 ) + String( F(",\n"
+      "\t\t\"flash_mode\": \"") ) + flash_mode + String( F("\",\n"
       "\t\t\"millis\": ") ) + String( millis() ) + String( F("\n"
     "\t},\n"
     "\t\"clock\": {\n"
@@ -3244,10 +3365,10 @@ void stopWebServer() {
 
 void startWebServer() {
   if( isWebServerInitialized ) return;
-  Serial.print( F("Starting web server...") );
+  writeToSerial( F("Starting web server..."), false );
   wifiWebServer.begin();
   isWebServerInitialized = true;
-  Serial.println( " done" );
+  writeToSerial( " done", true );
 }
 
 void configureWebServer() {
@@ -3277,13 +3398,13 @@ void configureWebServer() {
 #ifdef ESP8266
 WiFiEventHandler wiFiEventHandler;
 void onWiFiConnected( const WiFiEventStationModeConnected& event ) {
-  Serial.println( String( F("WiFi is connected to '") ) + String( event.ssid ) + String ( F("'") ) );
+  writeToSerial( String( F("WiFi is connected to '") ) + String( event.ssid ) + String ( F("'") ), true );
 }
 #else //ESP32 or ESP32S2
 void WiFiEvent( WiFiEvent_t event ) {
   switch( event ) {
     case SYSTEM_EVENT_STA_GOT_IP:
-      Serial.println( String( F("WiFi is connected to '") ) + String( WiFi.SSID() ) + String ( F("' with IP ") ) + WiFi.localIP().toString() );
+      writeToSerial( String( F("WiFi is connected to '") ) + String( WiFi.SSID() ) + String ( F("' with IP ") ) + WiFi.localIP().toString(), true );
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       //
@@ -3296,17 +3417,31 @@ void WiFiEvent( WiFiEvent_t event ) {
 
 
 void setup() {
-  initBeeper();
+  initVariables();
   initInternalLed();
+  initDisplayPhase1();
+
+  initBeeper();
+  initPowerModePin();
 
   Serial.begin( 115200 );
-  Serial.println();
-  Serial.println( String( F("Timer Clock by Dmytro Kurylo. V@") ) + getFirmwareVersion() + String( F(" CPU@") ) + String( ESP.getCpuFreqMHz() ) );
+  writeToSerial( "", true );
+  writeToSerial( String( F("Timer Clock by Dmytro Kurylo. V@") ) + getFirmwareVersion() + String( F(" CPU@") ) + String( ESP.getCpuFreqMHz() ), true );
+
+  #ifdef ESP8266
+
+  #elif defined(ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+  pinMode( HARD_RESET_PIN, INPUT_PULLDOWN );
+  if( digitalRead( HARD_RESET_PIN ) ) {
+    eepromFlashDataVersion = 255;
+  }
+  #else
+
+  #endif
 
   initEeprom();
   loadEepromData();
-  initVariables();
-  initDisplay();
+  initDisplayPhase2();
   LittleFS.begin();
 
   configureWebServer();
@@ -3343,22 +3478,34 @@ void loop() {
   }
   wifiWebServer.handleClient();
 
+  powerModeProcessLoopTick( isFirstLoopRun );
   encoderProcessLoopTick();
   timerProcessLoopTick();
   beeperProcessLoopTick();
   brightnessProcessLoopTick();
 
+  bool isWiFiShutdown = isEnergySavingMode && isRouterSsidProvided() && timeCanBeCalculated();
+  if( isWiFiShutdown ) {
+    shutdownAccessPoint();
+    disconnectFromWiFi( true, false );
+  }
+
   currentMillis = millis();
   if( isApInitialized && isRouterSsidProvided() && ( calculateDiffMillis( apStartedMillis, currentMillis ) >= TIMEOUT_AP ) ) {
-    shutdownAccessPoint();
-    connectToWiFiAsync( true );
+    if( !isWiFiShutdown ) {
+      shutdownAccessPoint();
+      connectToWiFiAsync( true );
+    }
     previousMillisWiFiStatusCheck = currentMillis;
   }
 
-  if( /*isFirstLoopRun || */( calculateDiffMillis( previousMillisWiFiStatusCheck, currentMillis ) >= DELAY_WIFI_CONNECTION_CHECK ) ) {
-    if( !WiFi.isConnected() ) {
-      if( !isApInitialized ) {
-        connectToWiFiAsync( false );
+  bool isWiFiStatusCheck = calculateDiffMillis( previousMillisWiFiStatusCheck, currentMillis ) >= DELAY_WIFI_CONNECTION_CHECK;
+  if( /*isFirstLoopRun || */isWiFiStatusCheck || WiFi.status() == WL_NO_SHIELD ) {
+    if( !isWiFiShutdown ) {
+      if( !WiFi.isConnected() ) {
+        if( !isApInitialized ) {
+          connectToWiFiAsync( isWiFiRadioShutDown ? true : false );
+        }
       }
     }
     previousMillisWiFiStatusCheck = currentMillis;
@@ -3409,5 +3556,19 @@ void loop() {
   }
 
   isFirstLoopRun = false;
+
+  #ifdef ESP8266
   delay(2); //https://www.tablix.org/~avian/blog/archives/2022/08/saving_power_on_an_esp8266_web_server_using_delays/
+  #else //ESP32 or ESP32S2
+  if( isEnergySavingMode && isWiFiShutdown && WiFi.status() == WL_NO_SHIELD &&
+      ( !isTimerSetupRunning ) &&
+      ( !isTimerRunning || ( calculateDiffMillis( encoderMovementDetectedMillis, millis() ) >= ENCODER_MOVEMENT_DETECTION_POWER_TIMEOUT_MILLIS ) )
+  ) {
+    Serial.flush();
+    esp_sleep_enable_timer_wakeup(50 * 1000); //light sleep for 50 milliseconds
+    esp_light_sleep_start();
+  } else {
+    delay(2); //https://www.tablix.org/~avian/blog/archives/2022/08/saving_power_on_an_esp8266_web_server_using_delays/
+  }
+  #endif
 }
