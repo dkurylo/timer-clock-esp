@@ -1967,18 +1967,19 @@ void handleWebServerGet() {
   wifiWebServer.sendContent( content );
   content = "";
 
-  //3900
+  //4000
   content += String( F(""
 "<script>"
   "let devnm=\"" ) ) + String( deviceName ) + String( F("\";"
   "let ap=" ) ) + String( isApInitialized ) + String( F(";"
+  "let fw=\"" ) ) + String( getFirmwareVersion() ) + String( F("\";"
   "document.addEventListener(\"DOMContentLoaded\",()=>{"
     "if(ap){"
       "setInterval(()=>{"
         "fetch(\"/ping\").catch(e=>{});"
       "},30000);"
     "}else{"
-      "fetch(\"https://github.com/dkurylo/timer-clock-esp/raw/refs/heads/main/fw_version.txt\").then(resp=>resp.text()).then(data=>{"
+      "fetch(\"https://raw.githubusercontent.com/dkurylo/timer-clock-esp/refs/heads/main/fw_version.txt\",{cache:\"no-cache\"}).then(resp=>resp.text()).then(data=>{"
         "if(fw!=data){"
           "let up=document.getElementById(\"fwup\");if(up){up.classList.add(\"act\");up.textContent+=' ('+fw+' → '+data+')';}"
         "}"
