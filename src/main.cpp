@@ -1977,14 +1977,14 @@ void handleWebServerGet() {
   wifiWebServer.send( 200, getContentType( F("html") ), "" );
 
   String content;
-  content.reserve( 6000 ); //currently 5000 max (when sending Html Page Start)
+  content.reserve( 6500 ); //currently 6200 max (when sending Html Page Start)
 
-  //5000
+  //6200
   addHtmlPageStart( content );
   wifiWebServer.sendContent( content );
   content = "";
 
-  //4000
+  //5300
   content += String( F(""
 "<script>"
   "let devnm=\"" ) ) + String( deviceName ) + String( F("\";"
@@ -2203,7 +2203,12 @@ void handleWebServerGet() {
       "<div class=\"fi\">") ) + getHtmlInput( F("SSID назва"), HTML_INPUT_TEXT, wiFiClientSsid, HTML_PAGE_WIFI_SSID_NAME, HTML_PAGE_WIFI_SSID_NAME, 0, sizeof(wiFiClientSsid) - 1, 0, true, false, "", "" ) + String( F("</div>"
       "<div class=\"fi\">") ) + getHtmlInput( F("SSID пароль"), HTML_INPUT_PASSWORD, wiFiClientPassword, HTML_PAGE_WIFI_PWD_NAME, HTML_PAGE_WIFI_PWD_NAME, 0, sizeof(wiFiClientPassword) - 1, 0, true, false, "", "" ) + String( F("</div>"
     "</div>"
-  "</div>"
+  "</div>" ) );
+  wifiWebServer.sendContent( content );
+  content = "";
+
+  //6100
+  content += String( F(""
   "<div class=\"fx fxsect\">"
     "<div class=\"fxh\">"
       "Налаштування таймера"
@@ -2225,12 +2230,7 @@ void handleWebServerGet() {
     "<div class=\"fxc\">"
       "<div class=\"fi\"><div id=\"exw\"><div id=\"exlw\"" ) ) + ( isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + "><div><div></div></div></div><div id=\"exdw\"></div><div id=\"exrw\"" + ( !isRotateDisplay ? String( F(" style=\"display:flex;\"") ) : "" ) + String( F("><div><div></div></div></div></div></div>"
     "</div>"
-  "</div>" ) );
-  wifiWebServer.sendContent( content );
-  content = "";
-
-  //4000
-  content += String( F(""
+  "</div>"
   "<div class=\"fx fxsect\">"
     "<div class=\"fxh\">"
       "Вигляд"
@@ -3156,9 +3156,9 @@ void handleWebServerGetFontEditor() {
   wifiWebServer.send( 200, getContentType( F("html") ), "" );
 
   String content;
-  content.reserve( 6000 ); //currently 5000 max (when sending Html Page Start)
+  content.reserve( 6500 ); //currently 6200 max (when sending Html Page Start)
 
-  //5000
+  //6200
   addHtmlPageStart( content );
   wifiWebServer.sendContent( content );
   content = "";
@@ -3238,7 +3238,7 @@ void handleWebServerGetFontEditor() {
   wifiWebServer.sendContent( content );
   content = "";
 
-  //3600
+  //3700
   content += String( F(""
     "const createDom=(()=>{"
       "let dom='<div class=\"fw\"><div class=\"hlw\"><div></div>'+getHeadersDom()+'</div>';"
