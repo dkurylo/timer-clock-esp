@@ -2195,6 +2195,7 @@ void handleWebServerGet() {
       "this.mkSegs();"
       "this.drawX();"
       "this.drawG();"
+      "this.drawCurVal(p.cv);"
     "},"
     "drawCurVal(cv){"
       "let p=this.gp;"
