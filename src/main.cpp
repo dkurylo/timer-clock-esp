@@ -93,11 +93,12 @@ bool isBeepWhenSwitchingFromBattery = true;
 #define BEEPER_PIN 5
 #endif
 
-uint8_t EEPROM_FLASH_DATA_VERSION = 2; //change to next number when eeprom data format is changed. 255 is a reserved value: is set to 255 when: hard reset pin is at 3.3V (high); during factory reset procedure; when FW is loaded to a new device (EEPROM reads FF => 255)
+uint8_t EEPROM_FLASH_DATA_VERSION = 3; //change to next number when eeprom data format is changed. 255 is a reserved value: is set to 255 when: hard reset pin is at 3.3V (high); during factory reset procedure; when FW is loaded to a new device (EEPROM reads FF => 255)
 uint8_t eepromFlashDataVersion = EEPROM_FLASH_DATA_VERSION;
 const char* getFirmwareVersion() { const char* result =
 #include "fw_version.txt"
 ; return result; }
+
 //device name
 char deviceName[16 + 1];
 
@@ -190,7 +191,8 @@ bool isRotateDisplay = false;
 bool isTimerAnimated = false;
 bool isClockAnimated = false;
 uint8_t animationTypeNumber = 1;
-
+uint8_t brightnessSteepnessCoefficient = 40;
+float brightnessSteepnessCoefficientStep = 0.05;
 
 //brightness settings
 #ifdef ESP8266
@@ -202,8 +204,8 @@ uint16_t sensorBrightnessDayLevel = 4096; //ESP32 has 12-bit ADC (0-4095); ESP32
 #endif
 
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
-const double SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS = 0.12;
-const uint16_t SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS = 15000;
+const double SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS = 0.10;
+const uint16_t SENSOR_BRIGHTNESS_SUSTAINED_LEVEL_HYSTERESIS_OVERRIDE_MILLIS = 10000;
 
 //custom datetime settings (used when there is no internet connection)
 bool isCustomDateTimeSet = false;
@@ -319,7 +321,7 @@ File getFileFromFlash( String fileName ) {
     writeToSerial( F("Succeeded to open directory"), true );
   }
   File file2 = root.openNextFile();
-  while (file2) {
+  while( file2 ) {
     writeToSerial( file2.name(), false );
     file2 = root.openNextFile();
   }
@@ -344,7 +346,8 @@ const uint16_t eepromDisplayDayBrightnessIndex = eepromIsDisplaySecondsShownInde
 const uint16_t eepromDisplayNightBrightnessIndex = eepromDisplayDayBrightnessIndex + 1;
 const uint16_t eepromSensorBrightnessDayLevelIndex = eepromDisplayNightBrightnessIndex + 1;
 const uint16_t eepromSensorBrightnessNightLevelIndex = eepromSensorBrightnessDayLevelIndex + 1;
-const uint16_t eepromTimerSetupResetTimeIndex = eepromSensorBrightnessNightLevelIndex + 1;
+const uint16_t eepromBrightnessSteepnessCoefficientIndex = eepromSensorBrightnessNightLevelIndex + 1;
+const uint16_t eepromTimerSetupResetTimeIndex = eepromBrightnessSteepnessCoefficientIndex + 1;
 const uint16_t eepromTimerRememberLastInputTimeIndex = eepromTimerSetupResetTimeIndex + 1;
 const uint16_t eepromTimerDeltaPressIndex = eepromTimerRememberLastInputTimeIndex + 1;
 const uint16_t eepromTimerDeltaTurnIndex = eepromTimerDeltaPressIndex + 1;
@@ -491,6 +494,7 @@ void loadEepromData() {
     readEepromUintValue( eepromSensorBrightnessNightLevelIndex, eepromSensorBrightnessNightLevel, true );
     sensorBrightnessNightLevel = ( (uint16_t)eepromSensorBrightnessNightLevel ) * ADC_STEP_FOR_BYTE;
     if( sensorBrightnessNightLevel > sensorBrightnessDayLevel ) sensorBrightnessNightLevel = sensorBrightnessDayLevel;
+    readEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient, true );
     readEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds, true );
     if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
     readEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes, true );
@@ -524,6 +528,7 @@ void loadEepromData() {
     writeEepromUintValue( eepromDisplayNightBrightnessIndex, displayNightBrightness );
     writeEepromUintValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayLevel / ADC_STEP_FOR_BYTE ) );
     writeEepromUintValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightLevel / ADC_STEP_FOR_BYTE ) );
+    writeEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient );
     if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
     writeEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds );
     writeEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes );
@@ -557,6 +562,7 @@ void createAccessPoint() {
   apStartedMillis = millis();
   writeToSerial( F("Creating WiFi AP..."), false );
   WiFi.softAPConfig( getWiFiAccessPointIp(), getWiFiAccessPointIp(), getWiFiAccessPointNetMask() );
+
   #ifdef ESP8266
   WiFi.softAP( ( String( getWiFiAccessPointSsid() ) + " " + String( ESP.getChipId() ) ).c_str(), getWiFiAccessPointPassword(), 0, false );
   #else //ESP32 or ESP32S2
@@ -656,7 +662,6 @@ double displayCurrentBrightness = static_cast<double>(displayNightBrightness);
 double displayPreviousBrightness = -1.0;
 double sensorBrightnessAverage = -1.0;
 int brightnessDiffSustainedMillis = 0;
-float steepnessCoefficient = 2.0;
 
 void calculateDisplayBrightness() {
   uint16_t currentBrightness = analogRead( BRIGHTNESS_INPUT_PIN );
@@ -676,7 +681,7 @@ void calculateDisplayBrightness() {
       displayCurrentBrightness = static_cast<double>(displayNightBrightness);
     } else {
       float normalizedSensorBrightnessAverage = (float)(sensorBrightnessAverage - sensorBrightnessNightLevel) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
-      float easingCoefficient = 1 - powf( 1 - normalizedSensorBrightnessAverage, steepnessCoefficient );
+      float easingCoefficient = 1 - powf( 1 - normalizedSensorBrightnessAverage, brightnessSteepnessCoefficient*brightnessSteepnessCoefficientStep );
       displayCurrentBrightness = displayNightBrightness + static_cast<double>( (displayDayBrightness - displayNightBrightness ) * easingCoefficient );
       //displayCurrentBrightness = displayNightBrightness + static_cast<double>( displayDayBrightness - displayNightBrightness ) * ( sensorBrightnessAverage - sensorBrightnessNightLevel ) / ( sensorBrightnessDayLevel - sensorBrightnessNightLevel );
     }
@@ -1960,8 +1965,6 @@ const char* HTML_PAGE_ALARM_BEEPING_TIME_NAME = "tbe";
 const char* HTML_PAGE_TIMER_SHOW_PROGRESS_INDICATOR_NAME = "tpi";
 const char* HTML_PAGE_TIMER_ANIMATED_NAME = "ta";
 
-const char* HTML_PAGE_CLOCK_ANIMATED_NAME = "ca";
-
 const char* HTML_PAGE_FONT_TYPE_NAME = "fnt";
 const char* HTML_PAGE_BOLD_FONT_NAME = "bld";
 const char* HTML_PAGE_SHOW_SECS_NAME = "sec";
@@ -1969,11 +1972,13 @@ const char* HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME = "sdh";
 const char* HTML_PAGE_COMPACT_LAYOUT_NAME = "cl";
 const char* HTML_PAGE_SLOW_SEMICOLON_ANIMATION_NAME = "ssa";
 const char* HTML_PAGE_ROTATE_DISPLAY_NAME = "rot";
+const char* HTML_PAGE_CLOCK_ANIMATED_NAME = "ca";
 const char* HTML_PAGE_ANIMATION_TYPE_NAME = "at";
 const char* HTML_PAGE_BRIGHTNESS_DAY_NAME = "brtd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_NAME = "brtn";
 const char* HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME = "brsd";
 const char* HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME = "brsn";
+const char* HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME = "brst";
 const char* HTML_PAGE_DEVICE_NAME_NAME = "dvn";
 
 void handleWebServerGet() {
@@ -2116,7 +2121,7 @@ void handleWebServerGet() {
       "ds:0,"
       "nb:0,"
       "db:0,"
-      "k:" ) ) + String( steepnessCoefficient ).c_str() + String( F(","
+      "k:0,"
       "smin:0,"
       "smax:0,"
       "bl:16"
@@ -2182,11 +2187,12 @@ void handleWebServerGet() {
     "},"
     "draw(isInit){"
       "let p=this.gp;"
-      "let brsd=document.getElementById(\"brsd\");"
-      "p.ns=parseInt(document.getElementById(\"brsn\").value);"
+      "let brsd=document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME + String( F("\");"
+      "p.ns=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME + String( F("\").value);"
       "p.ds=parseInt(brsd.value);"
-      "p.nb=parseInt(document.getElementById(\"brtn\").value);"
-      "p.db=parseInt(document.getElementById(\"brtd\").value);"
+      "p.nb=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_NIGHT_NAME + String( F("\").value);"
+      "p.db=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_DAY_NAME + String( F("\").value);"
+      "p.k=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME + String( F("\").value)*") ) + String(brightnessSteepnessCoefficientStep).c_str() + String( F(";"
       "p.smin=parseInt(brsd.min);"
       "p.smax=parseInt(brsd.max);"
       "if(isInit){"
@@ -2266,7 +2272,7 @@ void handleWebServerGet() {
   "<div class=\"fx fxsect\">"
     "<div class=\"fxh\">"
       "Вигляд"
-  "</div>"
+    "</div>"
     "<div class=\"fxc\">"
       "<div class=\"fi\">") ) + getHtmlInput( F("Показувати секунди"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SECS_NAME, HTML_PAGE_SHOW_SECS_NAME, 0, 0, 0, false, isDisplaySecondsShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
       "<div class=\"fi\">") ) + getHtmlInput( F("Показувати час без переднього нуля"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, HTML_PAGE_SHOW_SINGLE_DIGIT_HOUR_NAME, 0, 0, 0, false, isSingleDigitHourShown, "onchange=\"pv();\"", "" ) + String( F("</div>"
@@ -2290,7 +2296,7 @@ void handleWebServerGet() {
     "<div class=\"fxc\">"
       "<div class=\"fi\">") ) + getHtmlInput( F("Анімований годинник"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_CLOCK_ANIMATED_NAME, HTML_PAGE_CLOCK_ANIMATED_NAME, 0, 0, 0, false, isClockAnimated, "", "" ) + String( F("</div>"
       "<div class=\"fi\">") ) + getHtmlInput( F("Анімований таймер"), HTML_INPUT_CHECKBOX, "", HTML_PAGE_TIMER_ANIMATED_NAME, HTML_PAGE_TIMER_ANIMATED_NAME, 0, 0, 0, false, isTimerAnimated, "", "" ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 1, TCData::NUMBER_OF_ANIMATIONS_SUPPORTED, 0, false, animationTypeNumber, "", String( F( "oninput=\"this.nextElementSibling.src='/data?p='+this.value;\"><img class=\"ap\" src=\"/data?p=" ) ) + String( animationTypeNumber ) + String( F( "\"" ) ) ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Вид анімації"), HTML_INPUT_RANGE, String(animationTypeNumber).c_str(), HTML_PAGE_ANIMATION_TYPE_NAME, HTML_PAGE_ANIMATION_TYPE_NAME, 1, TCData::NUMBER_OF_ANIMATIONS_SUPPORTED, 0, false, false, "", String( F( "oninput=\"this.nextElementSibling.src='/data?p='+this.value;\"><img class=\"ap\" src=\"/data?p=" ) ) + String( animationTypeNumber ) + String( F( "\"" ) ) ) + String( F("</div>"
     "</div>"
   "</div>"
   "<div class=\"fx fxsect\">"
@@ -2298,10 +2304,11 @@ void handleWebServerGet() {
       "Яскравість"
     "</div>"
     "<div class=\"fxc\">"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, 0, false, displayDayBrightness, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, 0, false, displayNightBrightness, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (день)"), HTML_INPUT_RANGE, String(sensorBrightnessDayLevel).c_str(), HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, sensorBrightnessDayLevel, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (ніч)"), HTML_INPUT_RANGE, String(sensorBrightnessNightLevel).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, sensorBrightnessNightLevel, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, 0, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, 0, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (день)"), HTML_INPUT_RANGE, String(sensorBrightnessDayLevel).c_str(), HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (ніч)"), HTML_INPUT_RANGE, String(sensorBrightnessNightLevel).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, ADC_STEP_FOR_BYTE, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Крутизна залежності"), HTML_INPUT_RANGE, String(brightnessSteepnessCoefficient).c_str(), HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME, HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME, 0, 255, 1, false, false, "onchange=\"graph.draw();\"", String( F( "oninput=\"this.nextElementSibling.value=(this.value*" ) ) + String(brightnessSteepnessCoefficientStep) + String( F( ").toFixed(2);\"><output>" ) ) + String(brightnessSteepnessCoefficient*brightnessSteepnessCoefficientStep).c_str() + String( F( "</output" ) ) ) + String( F("</div>"
       "<div class=\"fi fv\">"
         "<div class=\"fi ex\"><div class=\"ex ext extfwon\" onclick=\"ex(this);mnt(2);\">Графік (сенсор &rarr; яскравість)</div></div>"
         "<div class=\"fi ex exc\"><div class=\"fi\"><div id=\"gc\"><div id=\"gw\"><div id=\"gr\"></div><div id=\"yg\"></div><div id=\"xg\"></div></div></div></div></div>"
@@ -2614,6 +2621,13 @@ void handleWebServerPost() {
     }
   }
 
+  String htmlPageSensorBrightnessSteepnessReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME );
+  uint sensorBrightnessSteepnessReceived = htmlPageSensorBrightnessSteepnessReceived.toInt();
+  bool sensorBrightnessSteepnessReceivedPopulated = false;
+  if( sensorBrightnessSteepnessReceived >= 0 && sensorBrightnessSteepnessReceived <= 255 ) {
+    sensorBrightnessSteepnessReceivedPopulated = true;
+  }
+
   String htmlPageDeviceNameReceived = wifiWebServer.arg( HTML_PAGE_DEVICE_NAME_NAME );
 
 
@@ -2769,6 +2783,14 @@ void handleWebServerPost() {
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Sensor night brightness level updated"), true );
     writeEepromUintValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightReceived / ADC_STEP_FOR_BYTE ) );
+  }
+
+  if( sensorBrightnessSteepnessReceivedPopulated && sensorBrightnessSteepnessReceived != brightnessSteepnessCoefficient ) {
+    brightnessSteepnessCoefficient = sensorBrightnessSteepnessReceived;
+    isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
+    isDisplayRerenderRequiredAfterSettingChanged = true;
+    writeToSerial( F("Brightness steepness coefficient updated"), true );
+    writeEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, sensorBrightnessSteepnessReceived );
   }
 
   if( strcmp( deviceName, htmlPageDeviceNameReceived.c_str() ) != 0 ) {
