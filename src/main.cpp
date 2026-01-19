@@ -140,7 +140,7 @@ uint8_t timerRememberLastInputTimeMinutes = 30; //CONFIGURABLE amount of time IN
 uint8_t timerDeltaTurnSeconds = 60; //CONFIGURABLE amount IN SECONDS which would be added by default on turn
 uint8_t timerDeltaPressMinutes = 5; //CONFIGURABLE amount IN MINUTES which would be added by default on press
 uint8_t alarmBlinkingTimeMinutes = 60; //CONFIGURABLE max amount of time IN MINUTES the timer would blink when timer is completed
-uint8_t alarmBeepingTimeSeconds = 120; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
+uint8_t alarmBeepingTimeSeconds = 90; //CONFIGURABLE max amount of time IN SECONDS the timer would beep when timer is completed
 uint8_t actionBeepingTimeMillis = 50; //max amount of time IN MILLISECONDS the timer would beep for some actions
 
 #ifdef ESP8266
@@ -178,30 +178,25 @@ char wiFiClientSsid[32 + 1];
 char wiFiClientPassword[32 + 1];
 
 uint8_t displayFontTypeNumber = 1;
-bool isDisplayBoldFontUsed = true;
+bool isDisplayBoldFontUsed = false;
 bool isDisplayCompactLayoutUsed = false;
 bool isDisplaySecondsShown = false;
 bool isProgressIndicatorShown = false;
 uint8_t displayDayBrightness = 9;
-uint8_t displayNightBrightness = 1;
+uint8_t displayNightBrightness = 0;
 bool isForceDisplaySync = true;
 bool isForceDisplaySyncDisplayRenderOverride = false;
-bool isSingleDigitHourShown = false;
+bool isSingleDigitHourShown = true;
 bool isRotateDisplay = false;
 bool isTimerAnimated = false;
 bool isClockAnimated = false;
 uint8_t animationTypeNumber = 1;
-uint8_t brightnessSteepnessCoefficient = 40;
+uint8_t brightnessSteepnessCoefficient = 66;
 float brightnessSteepnessCoefficientStep = 0.05;
 
 //brightness settings
-#ifdef ESP8266
-uint16_t sensorBrightnessNightLevel = 8; //ESP8266 has 10-bit ADC (0-1023)
-uint16_t sensorBrightnessDayLevel = 512; //ESP8266 has 10-bit ADC (0-1023)
-#else //ESP32 or ESP32S2
-uint16_t sensorBrightnessNightLevel = 32; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
-uint16_t sensorBrightnessDayLevel = 4096; //ESP32 has 12-bit ADC (0-4095); ESP32-S2 has 13-bit ADC (0-8191)
-#endif
+uint16_t sensorBrightnessNightLevel = 0;
+uint16_t sensorBrightnessDayLevel = 255 * ADC_STEP_FOR_BYTE;
 
 const uint16_t DELAY_SENSOR_BRIGHTNESS_UPDATE_CHECK = 100;
 const double SENSOR_BRIGHTNESS_LEVEL_HYSTERESIS = 0.10;
