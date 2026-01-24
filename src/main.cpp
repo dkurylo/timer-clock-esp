@@ -359,8 +359,8 @@ const uint16_t eepromIsDisplaySecondsShownIndex = eepromIsFontBoldUsedIndex + 1;
 const uint16_t eepromDisplayDayBrightnessIndex = eepromIsDisplaySecondsShownIndex + 1;
 const uint16_t eepromDisplayNightBrightnessIndex = eepromDisplayDayBrightnessIndex + 1;
 const uint16_t eepromSensorBrightnessDayLevelIndex = eepromDisplayNightBrightnessIndex + 1;
-const uint16_t eepromSensorBrightnessNightLevelIndex = eepromSensorBrightnessDayLevelIndex + 1;
-const uint16_t eepromBrightnessSteepnessCoefficientIndex = eepromSensorBrightnessNightLevelIndex + 1;
+const uint16_t eepromSensorBrightnessNightLevelIndex = eepromSensorBrightnessDayLevelIndex + 2;
+const uint16_t eepromBrightnessSteepnessCoefficientIndex = eepromSensorBrightnessNightLevelIndex + 2;
 const uint16_t eepromTimerSetupResetTimeIndex = eepromBrightnessSteepnessCoefficientIndex + 1;
 const uint16_t eepromTimerRememberLastInputTimeIndex = eepromTimerSetupResetTimeIndex + 1;
 const uint16_t eepromTimerDeltaPressIndex = eepromTimerRememberLastInputTimeIndex + 1;
@@ -409,7 +409,7 @@ bool writeEepromCharArray( const uint16_t& eepromIndex, char* newValue, uint8_t 
   return true;
 }
 
-uint8_t readEepromUintValue( const uint16_t& eepromIndex, uint8_t& variableWithValue, bool doApplyValue ) {
+uint8_t readEepromUint8Value( const uint16_t& eepromIndex, uint8_t& variableWithValue, bool doApplyValue ) {
   uint8_t eepromValue = EEPROM.read( eepromIndex );
   if( doApplyValue ) {
     variableWithValue = eepromValue;
@@ -417,9 +417,9 @@ uint8_t readEepromUintValue( const uint16_t& eepromIndex, uint8_t& variableWithV
   return eepromValue;
 }
 
-bool writeEepromUintValue( const uint16_t& eepromIndex, uint8_t newValue ) {
+bool writeEepromUint8Value( const uint16_t& eepromIndex, uint8_t newValue ) {
   bool eepromWritten = false;
-  if( readEepromUintValue( eepromIndex, newValue, false ) != newValue ) {
+  if( readEepromUint8Value( eepromIndex, newValue, false ) != newValue ) {
     EEPROM.write( eepromIndex, newValue );
     eepromWritten = true;
   }
@@ -428,6 +428,30 @@ bool writeEepromUintValue( const uint16_t& eepromIndex, uint8_t newValue ) {
     delay( 20 );
   }
   return eepromWritten;
+}
+
+uint16_t readEepromUint16Value( const uint16_t& eepromIndex, uint16_t& variableWithValue, bool doApplyValue ) {
+    uint8_t lo = EEPROM.read( eepromIndex );
+    uint8_t hi = EEPROM.read( eepromIndex + 1 );
+    uint16_t eepromValue = (uint16_t)lo | ((uint16_t)hi << 8);
+    if( doApplyValue ) {
+        variableWithValue = eepromValue;
+    }
+    return eepromValue;
+}
+
+bool writeEepromUint16Value( const uint16_t& eepromIndex, uint16_t newValue ) {
+    bool eepromWritten = false;
+    if( readEepromUint16Value( eepromIndex, newValue, false ) != newValue ) {
+        EEPROM.write( eepromIndex, newValue & 0xFF );
+        EEPROM.write( eepromIndex + 1, newValue >> 8 );
+        eepromWritten = true;
+    }
+    if( eepromWritten ) {
+        EEPROM.commit();
+        delay(20);
+    }
+    return eepromWritten;
 }
 
 bool readEepromBoolValue( const uint16_t& eepromIndex, bool& variableWithValue, bool doApplyValue ) {
@@ -484,7 +508,7 @@ bool writeEepromFontData( bool doErase ) {
 
 void loadEepromData() {
   if( eepromFlashDataVersion != 255 ) {
-    readEepromUintValue( eepromFlashDataVersionIndex, eepromFlashDataVersion, true );
+    readEepromUint8Value( eepromFlashDataVersionIndex, eepromFlashDataVersion, true );
   }
 
   if( eepromFlashDataVersion != 255 && eepromFlashDataVersion == EEPROM_FLASH_DATA_VERSION ) {
@@ -498,72 +522,69 @@ void loadEepromData() {
     sanitizeTextAscii( String(deviceNameReceived), deviceNameSanitized, sizeof(deviceNameSanitized) - 1 );
     strncpy(deviceName, deviceNameSanitized, sizeof(deviceNameSanitized) - 1);
     deviceName[sizeof(deviceName) - 1] = '\0';
-    readEepromUintValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber, true );
+    readEepromUint8Value( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber, true );
     if( displayFontTypeNumber < 1 || displayFontTypeNumber > TCFonts::NUMBER_OF_FONTS_SUPPORTED ) displayFontTypeNumber = 1;
     readEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFontUsed, true );
     readEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShown, true );
-    readEepromUintValue( eepromDisplayDayBrightnessIndex, displayDayBrightness, true );
+    readEepromUint8Value( eepromDisplayDayBrightnessIndex, displayDayBrightness, true );
     if( displayDayBrightness > 15 ) displayDayBrightness = 15;
-    readEepromUintValue( eepromDisplayNightBrightnessIndex, displayNightBrightness, true );
+    readEepromUint8Value( eepromDisplayNightBrightnessIndex, displayNightBrightness, true );
     if( displayNightBrightness > 15 ) displayNightBrightness = 15;
     if( displayNightBrightness > displayDayBrightness ) displayNightBrightness = displayDayBrightness;
-    uint8_t eepromSensorBrightnessDayLevel = 0;
-    readEepromUintValue( eepromSensorBrightnessDayLevelIndex, eepromSensorBrightnessDayLevel, true );
-    sensorBrightnessDayLevel = (uint16_t)(round( eepromSensorBrightnessDayLevel * (ADC_NUMBER_OF_VALUES - 1) / 255.0f ));
-    uint8_t eepromSensorBrightnessNightLevel = 0;
-    readEepromUintValue( eepromSensorBrightnessNightLevelIndex, eepromSensorBrightnessNightLevel, true );
-    sensorBrightnessNightLevel = (uint16_t)(round( eepromSensorBrightnessNightLevel * (ADC_NUMBER_OF_VALUES - 1) / 255.0f ));
-    if( sensorBrightnessNightLevel > sensorBrightnessDayLevel ) sensorBrightnessNightLevel = sensorBrightnessDayLevel;
-    readEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient, true );
-    readEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds, true );
+    readEepromUint16Value( eepromSensorBrightnessDayLevelIndex, sensorBrightnessDayLevel, true );
+    if( sensorBrightnessDayLevel >= ADC_NUMBER_OF_VALUES ) sensorBrightnessDayLevel = ADC_NUMBER_OF_VALUES - 1;
+    readEepromUint16Value( eepromSensorBrightnessNightLevelIndex, sensorBrightnessNightLevel, true );
+    if( sensorBrightnessNightLevel >= ADC_NUMBER_OF_VALUES ) sensorBrightnessNightLevel = 0;
+    readEepromUint8Value( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient, true );
+    readEepromUint8Value( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds, true );
     if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
-    readEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes, true );
-    readEepromUintValue( eepromTimerDeltaPressIndex, timerDeltaPressMinutes, true );
-    readEepromUintValue( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds, true );
+    readEepromUint8Value( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes, true );
+    readEepromUint8Value( eepromTimerDeltaPressIndex, timerDeltaPressMinutes, true );
+    readEepromUint8Value( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds, true );
     if( timerDeltaTurnSeconds == 0 ) timerDeltaTurnSeconds = 60;
-    readEepromUintValue( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes, true );
-    readEepromUintValue( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds, true );
+    readEepromUint8Value( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes, true );
+    readEepromUint8Value( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds, true );
     readEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown, true );
     readEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown, true );
     readEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay, true );
     readEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation, true );
     readEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimated, true );
     readEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimated, true );
-    readEepromUintValue( eepromAnimationTypeNumberIndex, animationTypeNumber, true );
+    readEepromUint8Value( eepromAnimationTypeNumberIndex, animationTypeNumber, true );
     if( animationTypeNumber < 1 || animationTypeNumber > TCData::NUMBER_OF_ANIMATIONS_SUPPORTED ) animationTypeNumber = 1;
     readEepromBoolValue( eepromIsCompactLayoutShownIndex, isDisplayCompactLayoutUsed, true );
     readEepromFontData();
 
   } else { //fill EEPROM with default values when starting the new board
-    writeEepromUintValue( eepromFlashDataVersionIndex, EEPROM_FLASH_DATA_VERSION );
+    writeEepromUint8Value( eepromFlashDataVersionIndex, EEPROM_FLASH_DATA_VERSION );
     eepromFlashDataVersion = EEPROM_FLASH_DATA_VERSION;
 
     writeEepromCharArray( eepromWiFiSsidIndex, wiFiClientSsid, sizeof(wiFiClientSsid) );
     writeEepromCharArray( eepromWiFiPasswordIndex, wiFiClientPassword, sizeof(wiFiClientPassword) );
     writeEepromCharArray( eepromDeviceNameIndex, deviceName, sizeof(deviceName) );
-    writeEepromUintValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber );
+    writeEepromUint8Value( eepromDisplayFontTypeNumberIndex, displayFontTypeNumber );
     writeEepromBoolValue( eepromIsFontBoldUsedIndex, isDisplayBoldFontUsed );
     writeEepromBoolValue( eepromIsDisplaySecondsShownIndex, isDisplaySecondsShown );
-    writeEepromUintValue( eepromDisplayDayBrightnessIndex, displayDayBrightness );
-    writeEepromUintValue( eepromDisplayNightBrightnessIndex, displayNightBrightness );
-    writeEepromUintValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayLevel / ADC_STEP_FOR_BYTE ) );
-    writeEepromUintValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightLevel / ADC_STEP_FOR_BYTE ) );
-    writeEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient );
+    writeEepromUint8Value( eepromDisplayDayBrightnessIndex, displayDayBrightness );
+    writeEepromUint8Value( eepromDisplayNightBrightnessIndex, displayNightBrightness );
+    writeEepromUint16Value( eepromSensorBrightnessDayLevelIndex, sensorBrightnessDayLevel );
+    writeEepromUint16Value( eepromSensorBrightnessNightLevelIndex, sensorBrightnessNightLevel );
+    writeEepromUint8Value( eepromBrightnessSteepnessCoefficientIndex, brightnessSteepnessCoefficient );
     if( timerSetupResetTimeSeconds < 5 ) timerSetupResetTimeSeconds = 30;
-    writeEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds );
-    writeEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes );
-    writeEepromUintValue( eepromTimerDeltaPressIndex, timerDeltaPressMinutes );
+    writeEepromUint8Value( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSeconds );
+    writeEepromUint8Value( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeMinutes );
+    writeEepromUint8Value( eepromTimerDeltaPressIndex, timerDeltaPressMinutes );
     if( timerDeltaTurnSeconds == 0 ) timerDeltaTurnSeconds = 60;
-    writeEepromUintValue( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds );
-    writeEepromUintValue( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes );
-    writeEepromUintValue( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds );
+    writeEepromUint8Value( eepromTimerDeltaTurnIndex, timerDeltaTurnSeconds );
+    writeEepromUint8Value( eepromTimerBlinkingTimeIndex, alarmBlinkingTimeMinutes );
+    writeEepromUint8Value( eepromTimerBeepingTimeIndex, alarmBeepingTimeSeconds );
     writeEepromBoolValue( eepromTimerIsProgressIndicatorShownIndex, isProgressIndicatorShown );
     writeEepromBoolValue( eepromIsSingleDigitHourShownIndex, isSingleDigitHourShown );
     writeEepromBoolValue( eepromIsRotateDisplayIndex, isRotateDisplay );
     writeEepromBoolValue( eepromIsSlowSemicolonAnimationIndex, isSlowSemicolonAnimation );
     writeEepromBoolValue( eepromIsTimerAnimatedIndex, isTimerAnimated );
     writeEepromBoolValue( eepromIsClockAnimatedIndex, isClockAnimated );
-    writeEepromUintValue( eepromAnimationTypeNumberIndex, animationTypeNumber );
+    writeEepromUint8Value( eepromAnimationTypeNumberIndex, animationTypeNumber );
     writeEepromBoolValue( eepromIsCompactLayoutShownIndex, isDisplayCompactLayoutUsed );
     writeEepromFontData( true );
 
@@ -2238,20 +2259,16 @@ void handleWebServerGet() {
       "g.appendChild(mn);"
       "g.appendChild(mx);"
     "},"
-    "convS(v){"
-      "let nV=") ) + String(ADC_NUMBER_OF_VALUES) + String( F(";"
-      "return parseInt(Math.round(v*(nV-1)/255));"
-    "},"
     "draw(isInit){"
       "let p=this.gp;"
       "let brsd=document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME + String( F("\");"
-      "p.ns=this.convS(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME + String( F("\").value);"
-      "p.ds=this.convS(brsd.value);"
+      "p.ns=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME + String( F("\").value);"
+      "p.ds=parseInt(brsd.value);"
       "p.nb=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_NIGHT_NAME + String( F("\").value);"
       "p.db=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_DAY_NAME + String( F("\").value);"
       "p.k=parseInt(document.getElementById(\"") ) + HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME + String( F("\").value)*") ) + String(brightnessSteepnessCoefficientStep).c_str() + String( F(";"
-      "p.smin=this.convS(brsd.min);"
-      "p.smax=this.convS(brsd.max);"
+      "p.smin=parseInt(brsd.min);"
+      "p.smax=parseInt(brsd.max);"
       "if(isInit){"
         "this.drawY();"
       "}"
@@ -2386,8 +2403,8 @@ void handleWebServerGet() {
     "<div class=\"fxc\">"
       "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вдень"), HTML_INPUT_RANGE, String(displayDayBrightness).c_str(), HTML_PAGE_BRIGHTNESS_DAY_NAME, HTML_PAGE_BRIGHTNESS_DAY_NAME, 0, 15, 0, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
       "<div class=\"fi\">") ) + getHtmlInput( F("Яскравість вночі"), HTML_INPUT_RANGE, String(displayNightBrightness).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_NAME, 0, 15, 0, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (день)"), HTML_INPUT_RANGE, String((uint8_t)(round( sensorBrightnessDayLevel * 255 / (float)(ADC_NUMBER_OF_VALUES - 1) ))).c_str(), HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, 0, 255, 1, false, false, "onchange=\"graph.draw();\"", String( F(" oninput=\"this.nextElementSibling.value=Math.round(this.value*(") ) + ADC_NUMBER_OF_VALUES + String( F("-1)/255);\"><output>") ) + String( sensorBrightnessDayLevel ) + String( F("</output") ) ) + String( F("</div>"
-      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (ніч)"), HTML_INPUT_RANGE, String((uint8_t)(round( sensorBrightnessNightLevel * 255 / (float)(ADC_NUMBER_OF_VALUES - 1) ))).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, 0, 255, 1, false, false, "onchange=\"graph.draw();\"", String( F(" oninput=\"this.nextElementSibling.value=Math.round(this.value*(") ) + ADC_NUMBER_OF_VALUES + String( F("-1)/255);\"><output>") ) + String( sensorBrightnessNightLevel ) + String( F("</output") ) ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (день)"), HTML_INPUT_RANGE, String(sensorBrightnessDayLevel).c_str(), HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, 1, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
+      "<div class=\"fi\">") ) + getHtmlInput( F("Сенсор яскравості (ніч)"), HTML_INPUT_RANGE, String(sensorBrightnessNightLevel).c_str(), HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME, 0, ADC_NUMBER_OF_VALUES - 1, 1, false, false, "onchange=\"graph.draw();\"", "" ) + String( F("</div>"
       "<div class=\"fi\">") ) + getHtmlInput( F("Крутизна залежності"), HTML_INPUT_RANGE, String(brightnessSteepnessCoefficient).c_str(), HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME, HTML_PAGE_BRIGHTNESS_STEEPNESS_NAME, 0, 255, 1, false, false, "onchange=\"graph.draw();\"", String( F( "oninput=\"this.nextElementSibling.value=(this.value*" ) ) + String(brightnessSteepnessCoefficientStep) + String( F( ").toFixed(2);\"><output>" ) ) + String(brightnessSteepnessCoefficient*brightnessSteepnessCoefficientStep).c_str() + String( F( "</output" ) ) ) + String( F("</div>"
       "<div class=\"fi fv\">"
         "<div class=\"fi ex\"><div class=\"ex ext extfwon\" onclick=\"ex(this);mnt(2);\">Графік (сенсор &rarr; яскравість)</div></div>"
@@ -2692,17 +2709,15 @@ void handleWebServerPost() {
   String htmlPageSensorBrightnessDayReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_DAY_SENSOR_NAME );
   uint sensorBrightnessDayReceived = htmlPageSensorBrightnessDayReceived.toInt();
   bool sensorBrightnessDayReceivedPopulated = false;
-  if( sensorBrightnessDayReceived >= 0 && sensorBrightnessDayReceived <= 255 ) {
+  if( sensorBrightnessDayReceived >= 0 && sensorBrightnessDayReceived <= ADC_NUMBER_OF_VALUES - 1 ) {
     sensorBrightnessDayReceivedPopulated = true;
-    sensorBrightnessDayReceived = (uint)(round( sensorBrightnessDayReceived * (ADC_NUMBER_OF_VALUES - 1) / 255.0f ));
   }
 
   String htmlPageSensorBrightnessNightReceived = wifiWebServer.arg( HTML_PAGE_BRIGHTNESS_NIGHT_SENSOR_NAME );
   uint sensorBrightnessNightReceived = htmlPageSensorBrightnessNightReceived.toInt();
   bool sensorBrightnessNightReceivedPopulated = false;
-  if( sensorBrightnessNightReceived >= 0 && sensorBrightnessNightReceived <= 255 ) {
+  if( sensorBrightnessNightReceived >= 0 && sensorBrightnessNightReceived <= ADC_NUMBER_OF_VALUES - 1 ) {
     sensorBrightnessNightReceivedPopulated = true;
-    sensorBrightnessNightReceived = (uint)(round( sensorBrightnessNightReceived * (ADC_NUMBER_OF_VALUES - 1) / 255.0f ));
     if( sensorBrightnessNightReceived > sensorBrightnessDayReceived ) {
       sensorBrightnessNightReceived = sensorBrightnessDayReceived;
     }
@@ -2732,37 +2747,37 @@ void handleWebServerPost() {
   if( timerSetupResetTimeSecondsReceivedPopulated && timerSetupResetTimeSecondsReceived != timerSetupResetTimeSeconds ) {
     timerSetupResetTimeSeconds = timerSetupResetTimeSecondsReceived;
     writeToSerial( F("Remember setup reset time updated"), true );
-    writeEepromUintValue( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSecondsReceived );
+    writeEepromUint8Value( eepromTimerSetupResetTimeIndex, timerSetupResetTimeSecondsReceived );
   }
 
   if( timerRememberLastInputTimeReceivedPopulated && timerRememberLastInputTimeReceived != timerRememberLastInputTimeMinutes ) {
     timerRememberLastInputTimeMinutes = timerRememberLastInputTimeReceived;
     writeToSerial( F("Remember last timer input time updated"), true );
-    writeEepromUintValue( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeReceived );
+    writeEepromUint8Value( eepromTimerRememberLastInputTimeIndex, timerRememberLastInputTimeReceived );
   }
 
   if( timerDeltaPressReceivedPopulated && timerDeltaPressReceived != timerDeltaPressMinutes ) {
     timerDeltaPressMinutes = timerDeltaPressReceived;
     writeToSerial( F("Timer press delta time updated"), true );
-    writeEepromUintValue( eepromTimerDeltaPressIndex, timerDeltaPressReceived );
+    writeEepromUint8Value( eepromTimerDeltaPressIndex, timerDeltaPressReceived );
   }
 
   if( timerDeltaTurnReceivedPopulated && timerDeltaTurnReceived != timerDeltaTurnSeconds ) {
     timerDeltaTurnSeconds = timerDeltaTurnReceived;
     writeToSerial( F("Timer turn delta time updated"), true );
-    writeEepromUintValue( eepromTimerDeltaTurnIndex, timerDeltaTurnReceived );
+    writeEepromUint8Value( eepromTimerDeltaTurnIndex, timerDeltaTurnReceived );
   }
 
   if( timerBlinkingTimeReceivedPopulated && timerBlinkingTimeReceived != alarmBlinkingTimeMinutes ) {
     alarmBlinkingTimeMinutes = timerBlinkingTimeReceived;
     writeToSerial( F("Timer blinking time updated"), true );
-    writeEepromUintValue( eepromTimerBlinkingTimeIndex, timerBlinkingTimeReceived );
+    writeEepromUint8Value( eepromTimerBlinkingTimeIndex, timerBlinkingTimeReceived );
   }
 
   if( timerBeepingTimeReceivedPopulated && timerBeepingTimeReceived != alarmBeepingTimeSeconds ) {
     alarmBeepingTimeSeconds = timerBeepingTimeReceived;
     writeToSerial( F("Timer beeping time updated"), true );
-    writeEepromUintValue( eepromTimerBeepingTimeIndex, timerBeepingTimeReceived );
+    writeEepromUint8Value( eepromTimerBeepingTimeIndex, timerBeepingTimeReceived );
   }
 
   if( timerShowProgressIndicatorReceivedPopulated && timerShowProgressIndicatorReceived != isProgressIndicatorShown ) {
@@ -2804,7 +2819,7 @@ void handleWebServerPost() {
     displayFontTypeNumber = displayFontTypeNumberReceived;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Display font updated"), true );
-    writeEepromUintValue( eepromDisplayFontTypeNumberIndex, displayFontTypeNumberReceived );
+    writeEepromUint8Value( eepromDisplayFontTypeNumberIndex, displayFontTypeNumberReceived );
   }
 
   if( isDisplayBoldFondUsedReceivedPopulated && isDisplayBoldFondUsedReceived != isDisplayBoldFontUsed ) {
@@ -2831,7 +2846,7 @@ void handleWebServerPost() {
   if( animationTypeNumberReceivedPopulated && animationTypeNumberReceived != animationTypeNumber ) {
     animationTypeNumber = animationTypeNumberReceived;
     writeToSerial( F("Display animation updated"), true );
-    writeEepromUintValue( eepromAnimationTypeNumberIndex, animationTypeNumberReceived );
+    writeEepromUint8Value( eepromAnimationTypeNumberIndex, animationTypeNumberReceived );
   }
 
   if( isSlowSemicolonAnimationReceivedPopulated && isSlowSemicolonAnimationReceived != isSlowSemicolonAnimation ) {
@@ -2847,7 +2862,7 @@ void handleWebServerPost() {
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Display brightness updated"), true );
-    writeEepromUintValue( eepromDisplayDayBrightnessIndex, displayDayBrightnessReceived );
+    writeEepromUint8Value( eepromDisplayDayBrightnessIndex, displayDayBrightnessReceived );
   }
 
   if( displayNightBrightnessReceivedPopulated && displayNightBrightnessReceived != displayNightBrightness ) {
@@ -2855,7 +2870,7 @@ void handleWebServerPost() {
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Display night mode brightness updated"), true );
-    writeEepromUintValue( eepromDisplayNightBrightnessIndex, displayNightBrightnessReceived );
+    writeEepromUint8Value( eepromDisplayNightBrightnessIndex, displayNightBrightnessReceived );
   }
 
   if( sensorBrightnessDayReceivedPopulated && sensorBrightnessDayReceived != sensorBrightnessDayLevel ) {
@@ -2863,7 +2878,7 @@ void handleWebServerPost() {
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Sensor day brightness level updated"), true );
-    writeEepromUintValue( eepromSensorBrightnessDayLevelIndex, (uint8_t)( sensorBrightnessDayReceived / ADC_STEP_FOR_BYTE ) );
+    writeEepromUint16Value( eepromSensorBrightnessDayLevelIndex, sensorBrightnessDayReceived );
   }
 
   if( sensorBrightnessNightReceivedPopulated && sensorBrightnessNightReceived != sensorBrightnessNightLevel ) {
@@ -2871,7 +2886,7 @@ void handleWebServerPost() {
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Sensor night brightness level updated"), true );
-    writeEepromUintValue( eepromSensorBrightnessNightLevelIndex, (uint8_t)( sensorBrightnessNightReceived / ADC_STEP_FOR_BYTE ) );
+    writeEepromUint16Value( eepromSensorBrightnessNightLevelIndex, sensorBrightnessNightReceived );
   }
 
   if( sensorBrightnessSteepnessReceivedPopulated && sensorBrightnessSteepnessReceived != brightnessSteepnessCoefficient ) {
@@ -2879,7 +2894,7 @@ void handleWebServerPost() {
     isDisplayIntensityUpdateRequiredAfterSettingChanged = true;
     isDisplayRerenderRequiredAfterSettingChanged = true;
     writeToSerial( F("Brightness steepness coefficient updated"), true );
-    writeEepromUintValue( eepromBrightnessSteepnessCoefficientIndex, sensorBrightnessSteepnessReceived );
+    writeEepromUint8Value( eepromBrightnessSteepnessCoefficientIndex, sensorBrightnessSteepnessReceived );
   }
 
   if( strcmp( deviceName, sanitizedDeviceNameReceived ) != 0 ) {
@@ -3090,7 +3105,7 @@ void handleWebServerGetReset() {
   wifiWebServer.sendHeader( String( F("Content-Length") ).c_str(), String( content.length() ) );
   wifiWebServer.send( 200, getContentType( F("html") ), content );
 
-  writeEepromUintValue( eepromFlashDataVersionIndex, 255 );
+  writeEepromUint8Value( eepromFlashDataVersionIndex, 255 );
   EEPROM.commit();
   delay( 20 );
 
